@@ -28,10 +28,9 @@
 
 <p align="center">
   <a href="https://github.com/shinkuan/Akagi/stargazers"><img src="https://img.shields.io/github/stars/shinkuan/Akagi?logo=github" alt="GitHub stars" /></a>
-  <a href="https://github.com/shinkuan/Akagi/releases"><img src="https://img.shields.io/github/v/release/shinkuan/Akagi?label=release&logo=github&include_prereleases" alt="Latest release" /></a>
   <a href="https://github.com/shinkuan/Akagi/issues"><img src="https://img.shields.io/github/issues/shinkuan/Akagi?logo=github" alt="Open issues" /></a>
   <a href="./LICENSE.txt"><img src="https://img.shields.io/badge/license-Apache%202.0-blue?logo=apache" alt="License: Apache-2.0" /></a>
-  <a href="https://github.com/shinkuan/Akagi/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/shinkuan/Akagi/release.yml?branch=v3&logo=githubactions&label=build" alt="Build status" /></a>
+  <a href="https://github.com/shinkuan/Akagi/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/shinkuan/Akagi/build.yml?branch=main&logo=githubactions&label=build" alt="Build status" /></a>
   <a href="https://discord.gg/Z2wjXUK8bN"><img src="https://img.shields.io/discord/1192792431364673577?label=discord&logo=discord&color=7289DA" alt="Discord" /></a>
   <a href="https://deepwiki.com/shinkuan/Akagi"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" /></a>
 </p>
@@ -599,10 +598,11 @@ cargo test               # all tests, incl. integration
 cargo test --release     # for the perf bench
 ```
 
-## Releases & CI
+## Builds & CI
 
-GitHub Actions [`release.yml`](./.github/workflows/release.yml) builds
-on tag push (`v3.*`) or manual dispatch. One portable zip per target:
+GitHub Actions [`build.yml`](./.github/workflows/build.yml) builds every push
+to `main`, or a manual dispatch on `main`. One portable zip is uploaded as an
+Actions artifact per target:
 
 | OS runner | Target | Artifact |
 |---|---|---|
@@ -610,17 +610,11 @@ on tag push (`v3.*`) or manual dispatch. One portable zip per target:
 | `macos-14` | `aarch64-apple-darwin` | `akagi-<version>-macos-arm64.zip` |
 | `windows-latest` | `x86_64-pc-windows-msvc` | `akagi-<version>-windows-x64.zip` |
 
-Repository admins can build the current head commit of an open PR by posting
-an exact `/build-artifacts` comment on that PR. The
-[`pr-build.yml`](./.github/workflows/pr-build.yml) workflow replies with links
-to the three portable artifacts when the build finishes; artifacts are retained
-for 14 days. Comments from users without repository admin permission are
-ignored.
+Artifacts are retained for 14 days. This workflow does not create a GitHub
+Release.
 
 Each zip ships `python-build-standalone` 3.12 + `uv` next to the
 binary, so bots run without a system Python install.
-
-Tags must be on the `v3` branch.
 
 ## Reference Materials
 

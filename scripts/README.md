@@ -17,7 +17,7 @@ scripts/fetch-runtime.sh x86_64-pc-windows-msvc  # cross-target
 
 Versions come from env vars (`PYTHON_VERSION`, `PBS_RELEASE`,
 `UV_VERSION`) with built-in defaults. CI sets them via the `env:` block
-at the top of `.github/workflows/release.yml`.
+at the top of `.github/workflows/build.yml`.
 
 The `runtime/` tree is gitignored. Each per-triple subtree caches under
 the same key in CI (`Cache bundled runtime` step), so a second run on
@@ -66,7 +66,7 @@ table in `docs/proto_config.bytes` — and writes:
 - `src/bridge/majsoul/liqi.json` — flat rpc-map `".lq.Svc.method" → {req, resp}`.
 
 It exposes `product_version`, `bundle_hash`, and `changed=true/false` as GHA
-outputs; the workflow opens a PR on `v3` when the schema moved. Requires
+outputs; the workflow opens a PR on `main` when the schema moved. Requires
 `requests`, `UnityPy`, and `protobuf`. There is no dependency on any external
 proto release or on the legacy `res/proto/liqi.json` CDN file (a lagging
 Laya-era artifact since Mahjong Soul's Unity WASM migration).
@@ -80,7 +80,7 @@ python scripts/extract_liqi.py --from-raw <dir-with-lua-and-proto_config>
 
 ## CI integration
 
-`.github/workflows/release.yml` ties `fetch-runtime.sh` and
+`.github/workflows/build.yml` ties `fetch-runtime.sh` and
 `package-zip.sh` together: fetch → `cargo build --release` →
 package → upload `dist/*.zip`. One zip per target (linux-x64,
 macos-arm64, windows-x64).

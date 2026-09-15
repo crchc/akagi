@@ -26,10 +26,9 @@
 
 <p align="center">
   <a href="https://github.com/shinkuan/Akagi/stargazers"><img src="https://img.shields.io/github/stars/shinkuan/Akagi?logo=github" alt="GitHub stars" /></a>
-  <a href="https://github.com/shinkuan/Akagi/releases"><img src="https://img.shields.io/github/v/release/shinkuan/Akagi?label=release&logo=github&include_prereleases" alt="Latest release" /></a>
   <a href="https://github.com/shinkuan/Akagi/issues"><img src="https://img.shields.io/github/issues/shinkuan/Akagi?logo=github" alt="Open issues" /></a>
   <a href="./LICENSE.txt"><img src="https://img.shields.io/badge/license-Apache%202.0-blue?logo=apache" alt="License: Apache-2.0" /></a>
-  <a href="https://github.com/shinkuan/Akagi/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/shinkuan/Akagi/release.yml?branch=v3&logo=githubactions&label=build" alt="Build status" /></a>
+  <a href="https://github.com/shinkuan/Akagi/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/shinkuan/Akagi/build.yml?branch=main&logo=githubactions&label=build" alt="Build status" /></a>
   <a href="https://discord.gg/Z2wjXUK8bN"><img src="https://img.shields.io/discord/1192792431364673577?label=discord&logo=discord&color=7289DA" alt="Discord" /></a>
   <a href="https://deepwiki.com/shinkuan/Akagi"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" /></a>
 </p>
@@ -599,11 +598,11 @@ cargo test               # 所有測試（含整合測試）
 cargo test --release     # 用於效能 bench
 ```
 
-## Releases 與 CI
+## 建置與 CI
 
-GitHub Actions [`release.yml`](./.github/workflows/release.yml)
-會在 tag 推送(`v3.*`)或手動觸發時建置,每個目標產出一個
-portable zip:
+GitHub Actions [`build.yml`](./.github/workflows/build.yml)
+會在每次推送到 `main` 時建置，也可在 `main` 上手動觸發。每個目標
+會上傳一個 portable zip 作為 Actions 產物：
 
 | OS runner | 目標 | 產出檔案 |
 |---|---|---|
@@ -614,16 +613,7 @@ portable zip:
 每個 zip 都將 `python-build-standalone` 3.12 + `uv` 一併放在
 binary 旁邊,bot 不需另外安裝系統 Python 即可運作。
 
-發佈 job 會以 [minisign](https://jedisct1.github.io/minisign/) 為
-release zip 簽章（產生 `<asset>.zip.minisig`，trusted comment 為
-檔名）。公鑰保存在儲存庫根目錄的
-[`minisign.pub`](./minisign.pub) 並內嵌於應用程式；凡是經過下載
-鏡像的更新都必須通過簽章驗證。簽章需要儲存庫 secret
-`MINISIGN_SECRET_KEY`（兩行的 minisign 私鑰檔，需以免密碼方式
-產生，如 `rsign generate -W`）；secret 缺失時 workflow 會警告並
-發佈未簽章產物。
-
-Tag 必須位於 `v3` 分支。
+產物保留 14 天。此 workflow 不會建立 GitHub Release。
 
 ## 參考資料
 

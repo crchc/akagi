@@ -1,13 +1,10 @@
 name: CI
 
-# Linux runs lint and tests; macOS and Windows provide compile coverage for
-# platform-specific capture and process-management code.
-
 on:
   pull_request:
-    branches: [v2, v3]
+    branches: [main]
   push:
-    branches: [v2, v3]
+    branches: [main]
 
 # A newer push to the same ref cancels the in-flight run.
 concurrency:
@@ -46,30 +43,6 @@ jobs:
       # spawn_with_command arity break in tests/example_bot.rs.
       - name: build all test targets
         run: cargo test --no-run --all-targets
-
-  # Compile-only on the other two release targets. No tests, no packaging — the
-  # point is purely "does this platform's cfg path still build", which is the
-  # one thing the Linux gate above structurally cannot tell us. `macos-14` is
-  # arm64, matching release.yml's `aarch64-apple-darwin`.
-  compile:
-    name: Compile (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-14, windows-latest]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      # --all-targets so the binary is compiled too, not just the library.
-      - name: cargo check
-        run: cargo check --all-targets --locked
 
   frontend:
     name: Frontend (lint + build)

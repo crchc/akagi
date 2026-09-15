@@ -15,10 +15,10 @@ jobs:
   auto-liqi:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout v3
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          ref: v3
+          ref: main
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,7 +37,7 @@ jobs:
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          base: v3
+          base: main
           branch: auto/liqi-${{ steps.extract.outputs.product_version }}
           delete-branch: true
           commit-message: |
