@@ -9,8 +9,7 @@
 //!    plus per-game stat counters mirroring `libriichi/src/stat.rs`),
 //! 2. writing the full event stream as `games/<id>.mjai.jsonl`,
 //! 3. appending the record JSON line to `index.jsonl`,
-//! 4. fan-out via `HistoryBus` so the IPC forwarder can emit
-//!    `history-recorded` to the frontend.
+//! 4. publishing `history-recorded` through `HistoryBus` and SSE.
 //!
 //! A Mahjong Soul reconnect carries a stable private table id: the recorder
 //! keeps completed rounds and replaces the server-restored copy of the current

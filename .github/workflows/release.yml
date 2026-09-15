@@ -65,12 +65,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # macos-14 ships a Homebrew `cargo` shim at /opt/homebrew/bin/cargo
-      # that forwards to `rustup-init`, and Homebrew's bin precedes
-      # ~/.cargo/bin in PATH — so plain `cargo <subcmd>` (including
-      # `cargo tauri build`) resolves to rustup-init and fails with
-      # "unexpected argument 'tauri'". Prepend the dtolnay-installed cargo
-      # to GITHUB_PATH so every later step sees the real binary first.
+      # Ensure the toolchain installed above wins over Homebrew's cargo shim.
       - name: Prefer ~/.cargo/bin over Homebrew rustup-init (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -87,51 +82,6 @@ jobs:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
-
-      # build.rs runs prost-build to compile liqi.proto and needs protoc
-      # on PATH. arduino/setup-protoc handles all three OSes.
-      - name: Setup protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      # tauri-cli build is slow (~3 min). Pull the prebuilt binary via
-      # taiki-e/install-action instead — sidesteps GitHub Actions' cache
-      # scope rules (tag pushes can only read caches from the tag ref or
-      # the default branch, which here is v2 and never runs this workflow,
-      # so a cargo-install cache never hits). We previously used
-      # cargo-bins/cargo-binstall directly, but on macos-14 runners with
-      # Homebrew rustup pre-installed the `cargo` proxy resolves to
-      # rustup-init and `cargo binstall` fails; taiki-e/install-action
-      # invokes the binstall binary with an absolute path and avoids that.
-      - name: Install tauri-cli
-        uses: taiki-e/install-action@v2
-        with:
-          tool: tauri-cli@2.11.1
-
-      - name: Linux system deps
-        if: runner.os == 'Linux'
-        # Hard cap the step: apt has no stall-timeout for downloads, so a
-        # single wedged mirror connection can hang until the 6 h runner
-        # limit (it did on the v3.2.0 run, stuck mid-fetch of the 27 MB
-        # libwebkit2gtk package). 12 min is ample for a ~55 MB install.
-        timeout-minutes: 12
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          set -euo pipefail
-          # Bound each socket to 30 s and retry, so a stalled download
-          # aborts and re-fetches instead of trickling forever.
-          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-          sudo apt-get "${apt_opts[@]}" update
-          sudo apt-get "${apt_opts[@]}" install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            libsoup-3.0-dev \
-            libssl-dev \
-            patchelf \
-            libfuse2
 
       # Cache fetched python + uv tarballs by version triple. The runtime
       # is shipped inside every zip, so the fetch is unconditional.
@@ -151,15 +101,14 @@ jobs:
           UV_VERSION: ${{ env.UV_VERSION }}
         run: bash scripts/fetch-runtime.sh "${{ matrix.target }}"
 
-      # `--no-bundle` skips the (now empty) installer phase. We keep
-      # `cargo tauri build` (vs. plain `cargo build`) so the
-      # `beforeBuildCommand` in tauri.conf.json — `npm ci && npm run
-      # build` — still runs and the frontend is rebuilt fresh.
       - name: Build
         shell: bash
         env:
           NO_STRIP: '1'
-        run: cargo tauri build --no-bundle --target ${{ matrix.target }}
+        run: |
+          npm ci --prefix frontend
+          npm run --prefix frontend build
+          cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Package zip
         shell: bash

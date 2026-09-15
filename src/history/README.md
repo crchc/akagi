@@ -22,7 +22,7 @@ time — lexicographically sortable by start time, doubles as the filename stem.
                     └──────────────┘
                             │
                             ▼
-                       HistoryBus  ──▶  ipc forwarder  ──▶  "history-recorded" Tauri event
+                       HistoryBus  ──▶  web::SSE  ──▶  "history-recorded"
 ```
 
 A `RecorderState` machine buffers events between `StartGame` and a confirmed

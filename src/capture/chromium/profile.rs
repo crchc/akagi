@@ -327,9 +327,8 @@ fn reclaim_singleton_inner(profile: &Path) -> Result<()> {
 fn process_alive_unix(pid: i32) -> bool {
     // Shell out to `kill -0 <pid>` — POSIX signal-0 probe. Exit 0 means
     // alive (or alive-but-unsignalable, which we treat the same: don't
-    // touch the lock). Avoids pulling libc in directly. Absolute path
-    // is consistent across Linux and macOS — no PATH ambiguity.
-    let status = std::process::Command::new("/bin/kill")
+    // touch the lock). Resolve `kill` through PATH for systems without `/bin`.
+    let status = std::process::Command::new("kill")
         .args(["-0", &pid.to_string()])
         .stderr(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -346,7 +345,7 @@ fn process_alive_unix(pid: i32) -> bool {
 /// since the owner is not a `Child` of this process.
 #[cfg(unix)]
 fn terminate_pid_unix(pid: i32) -> bool {
-    let _ = std::process::Command::new("/bin/kill")
+    let _ = std::process::Command::new("kill")
         .args(["-TERM", &pid.to_string()])
         .stderr(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -355,7 +354,7 @@ fn terminate_pid_unix(pid: i32) -> bool {
         return true;
     }
     warn!("chromium pid {pid} did not exit after SIGTERM, sending SIGKILL");
-    let _ = std::process::Command::new("/bin/kill")
+    let _ = std::process::Command::new("kill")
         .args(["-KILL", &pid.to_string()])
         .stderr(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

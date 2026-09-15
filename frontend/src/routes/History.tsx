@@ -3,8 +3,8 @@
 // game list at the bottom.
 //
 // All filtering happens in-memory off the records cached in
-// `useHistoryStore`. The store is hydrated by `useTauriBridge` on
-// startup and kept current by the `history-recorded` Tauri event.
+// `useHistoryStore`. The store is hydrated by `useBackendBridge` on
+// startup and kept current by the `history-recorded` SSE event.
 
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'

@@ -9,7 +9,7 @@ fed by the MJAI event stream from the proxy bridge.
 `riichienv-core` is great as a simulation engine but its public API is
 shaped for RL training: `Vec<...>` everywhere, raw `u8` tile IDs in
 0..136 with the red-five convention (16/52/88), `Phase` as a bare enum,
-and so on. None of that is what a UI or downstream IPC layer wants.
+and so on. None of that is what the Web UI needs.
 
 This module:
 
@@ -46,10 +46,10 @@ Spawned from `lib.rs` once the MJAI bus exists:
 ```rust
 let tracker = game_state::spawn(mjai_bus.subscribe());
 // tracker: Arc<Mutex<GameTracker>>
-//   → IPC commands (future) read snapshot via `tracker.lock().await.snapshot()`
+//   → Web API reads snapshots via `tracker.lock().await.snapshot()`
 ```
 
-The handle is held by `AppState` so future IPC commands can pull
+The handle is held by `AppState` so Web API operations can pull
 snapshots without keeping a separate reference.
 
 ## Querying
@@ -121,10 +121,7 @@ The hand string is `riichienv`'s MPSZ notation, not mjai. Use
 - A patch in `convert.rs` if a new mjai event variant has a shape
   mismatch between Akagi and riichienv.
 
-## Future: GameStateBus
+## Live snapshots
 
-When the IPC layer needs live state push (toast-style or reactive UI),
-add a `GameStateBus` to `crate::event_bus` and have `tracker::run`
-publish a snapshot on every event (or every N events). The current
-design intentionally stops one step short of that — snapshot-on-pull
-is enough for the read-only commands we need first.
+The Web UI reads snapshots through `get_game_snapshot`. Add a
+`GameStateBus` only if a future consumer needs pushed snapshots.

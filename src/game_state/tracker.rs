@@ -21,10 +21,8 @@
 //!
 //! # Concurrent access
 //!
-//! `spawn` returns an `Arc<Mutex<GameTracker>>` so future IPC commands
-//! can pull a snapshot without going through a separate bus. The IPC
-//! layer is intentionally not wired in this round — the tracker is
-//! ready to be exposed when the frontend needs it.
+//! `AppState` holds the tracker behind a mutex so Web API operations can read
+//! snapshots while the background task continues applying events.
 
 use crate::event_bus::TrackedEvent;
 use crate::game_state::convert;

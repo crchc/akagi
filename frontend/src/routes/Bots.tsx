@@ -31,8 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
-import { invoke } from '@/lib/tauri'
+import { installBotFromZip, invoke } from '@/lib/api'
 import { withInstallBlock } from '@/lib/install'
 import { toast } from '@/components/ui/sonner'
 import { useBotStore } from '@/stores/botStore'
@@ -447,37 +446,19 @@ function InstallFromGithubDialog({ onInstalled }: { onInstalled: () => void }) {
 function InstallFromZipDialog({ onInstalled }: { onInstalled: () => void }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  const [zipPath, setZipPath] = useState('')
+  const [archive, setArchive] = useState<File | null>(null)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  const browse = async () => {
-    setErr(null)
-    try {
-      const picked = await openFileDialog({
-        multiple: false,
-        directory: false,
-        filters: [{ name: 'Zip archive', extensions: ['zip'] }],
-      })
-      if (typeof picked === 'string') setZipPath(picked)
-    } catch (e) {
-      setErr(String(e))
-    }
-  }
-
   const submit = async () => {
+    if (!archive) return
     setBusy(true)
     setErr(null)
     try {
-      await withInstallBlock(() =>
-        invoke('install_bot_from_zip', {
-          zipPath,
-          name: name || undefined,
-        }),
-      )
+      await withInstallBlock(() => installBotFromZip(archive, name || undefined))
       setOpen(false)
-      setZipPath('')
+      setArchive(null)
       setName('')
       onInstalled()
     } catch (e) {
@@ -502,22 +483,17 @@ function InstallFromZipDialog({ onInstalled }: { onInstalled: () => void }) {
         <div className="grid min-w-0 gap-4 py-2">
           <div className="grid gap-1.5">
             <Label>{t('bots.install_zip_path')}</Label>
-            <div className="flex gap-2">
-              <Input
-                value={zipPath}
-                onChange={(e) => setZipPath(e.target.value)}
-                placeholder={t('bots.install_zip_path_placeholder')}
-              />
-              <Button variant="outline" onClick={browse} className="shrink-0">
-                {t('bots.install_zip_browse')}
-              </Button>
-            </div>
+            <Input
+              type="file"
+              accept=".zip,application/zip"
+              onChange={(e) => setArchive(e.target.files?.[0] ?? null)}
+            />
             <span className="text-xs text-muted-foreground">
               {t('bots.install_zip_path_hint')}
             </span>
           </div>
           <div className="grid gap-1.5">
-            <Label>{t('bots.install_local_name')}</Label>
+            <Label>{t('bots.install_zip_name')}</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="mortal" />
           </div>
           {err && (
@@ -526,7 +502,7 @@ function InstallFromZipDialog({ onInstalled }: { onInstalled: () => void }) {
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>{t('common.cancel')}</Button>
-          <Button onClick={submit} disabled={busy || !zipPath}>
+          <Button onClick={submit} disabled={busy || !archive}>
             {busy ? t('common.installing') : t('common.install')}
           </Button>
         </DialogFooter>
@@ -782,4 +758,3 @@ function NativeApiSettings() {
     </Card>
   )
 }
-

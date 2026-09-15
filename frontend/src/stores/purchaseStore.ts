@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import i18n from 'i18next'
-import { invoke } from '@/lib/tauri'
+import { invoke } from '@/lib/api'
 import { openExternal } from '@/lib/external'
 import { persistApiConfig } from '@/lib/nativeApi'
 import { toast } from '@/components/ui/sonner'

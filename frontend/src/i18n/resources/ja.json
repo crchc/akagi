@@ -482,14 +482,7 @@
       "min_delay_hint": "すべての操作の安全下限：雀魂が画面を描画する前のクリックは無視されます。両モードに適用され、スクリプトでもこの値を下回れません。",
       "min_button_delay": "ボタン最小遅延（ms）",
       "min_button_delay_hint": "チー/ポン/カン/ロン/スキップ/リーチなどのボタン用のより高い下限——ボタンは打牌アニメーションと自身のポップイン後にしか表示されず、手牌より遅れます。ボタンのクリックが外れる場合はこの値を上げてください。"
-    },
-    "overlay": "推奨オーバーレイ",
-    "overlay_enabled": "オーバーレイウィンドウを表示",
-    "overlay_enabled_hint": "ゲーム画面の上に常に最前面で浮かぶ小さなウィンドウで、AI の推奨打牌を表示します。ドラッグで移動、端をつかんでサイズ変更できます。",
-    "overlay_top_n": "表示する候補数",
-    "overlay_opacity": "不透明度",
-    "overlay_always_on_top": "常に最前面に表示",
-    "overlay_always_on_top_hint": "サブモニターに置く場合はオフにしてください。なお、ゲームが排他的フルスクリーンの場合は最前面ウィンドウがすべて隠れるため、ボーダーレスまたはウィンドウモードをご利用ください。"
+    }
   },
   "setup": {
     "title": "Akagi セットアップ",
@@ -593,12 +586,13 @@
     "install_repo_hint_post": "）。",
     "install_glob": "Asset glob（任意）",
     "install_local_name": "ローカル名（任意、デフォルトは repo 名）",
+    "install_zip_name": "Bot 名（任意、デフォルトはファイル名）",
     "install_zip_btn": "ZIP からインストール",
     "install_zip_title": "ローカルの ZIP ファイルから Bot をインストール",
     "install_zip_path": "ZIP ファイル",
     "install_zip_path_placeholder": "/path/to/bot.zip",
     "install_zip_browse": "参照…",
-    "install_zip_path_hint": "ローカルの .zip を選択するか、フルパスを貼り付けてください。",
+    "install_zip_path_hint": "ローカルの .zip ファイルを選択してください。",
     "drawer_loading": "読み込み中…",
     "drawer_reinstall": "環境を再構築",
     "drawer_reinstall_tooltip": "この Bot の Python virtualenv を消去して再構築",
@@ -750,11 +744,7 @@
       "reset_hint": "元に戻したいときは「レイアウトをリセット」でいつでも初期配置に戻せます。",
       "got_it": "OK",
       "help_aria": "ボードのヒントを表示"
-    },
-    "overlay": "オーバーレイ",
-    "overlay_show": "推奨オーバーレイを表示",
-    "overlay_hide": "推奨オーバーレイを非表示",
-    "overlay_toggle_failed": "オーバーレイを切り替えられませんでした"
+    }
   },
   "mahjong": {
     "riichi": "リーチ",
@@ -914,9 +904,5 @@
   "install_overlay": {
     "title": "インストール中…",
     "warning": "インストールが完了するまで、アプリを閉じたり対局を開始しないでください。"
-  },
-  "overlay": {
-    "close": "オーバーレイを閉じる",
-    "empty": "AI の判断を待っています…"
   }
 }

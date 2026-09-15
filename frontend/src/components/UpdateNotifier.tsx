@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { selectHasNotifiableUpdate, useUpdaterStore } from '@/stores/updaterStore'
-import { HAS_TAURI } from '@/lib/tauri'
+import { HAS_BACKEND } from '@/lib/api'
 import { UpdateDialog } from '@/components/UpdateDialog'
 
 /// Invisible coordinator. Mount it once near the root of the tree.
@@ -29,7 +29,7 @@ export function UpdateNotifier() {
   // 3s deferred auto-check on launch — keeps the startup path cold-cache-fast
   // and gives the rest of the app time to mount before we render a toast.
   useEffect(() => {
-    if (!HAS_TAURI || !autoCheckEnabled) return
+    if (!HAS_BACKEND || !autoCheckEnabled) return
     const id = window.setTimeout(() => {
       void checkNow(false)
     }, 3000)

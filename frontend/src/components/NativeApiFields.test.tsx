@@ -18,9 +18,9 @@ vi.mock('react-i18next', () => ({
 }))
 
 const invoke = vi.fn()
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/api', () => ({
   invoke: (cmd: string, args?: Record<string, unknown>) => invoke(cmd, args),
-  HAS_TAURI: false,
+  HAS_BACKEND: false,
   listen: () => Promise.resolve(() => {}),
 }))
 

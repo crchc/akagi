@@ -15,9 +15,7 @@
 //!   only answerable by putting it on the same timeline as everything
 //!   else.
 //!
-//! Same shape on the wire (live tail over `tauri::ipc::Channel`) and on
-//! disk (`<session>/inspector.jsonl`). The on-disk file is the source of
-//! truth for past-session viewing; the bus/channel is the live tail.
+//! The same shape is written to `<session>/inspector.jsonl` and sent over SSE.
 
 use super::MjaiEvent;
 use serde::{Deserialize, Serialize};

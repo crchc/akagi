@@ -5,8 +5,8 @@
 //! - `manifest.toml` — schema, source-controlled, immutable. Declares which
 //!   knobs the bot exposes to the user (API URL, API key, model selection,
 //!   …) and optional metadata for the install pipeline.
-//! - `settings.toml` — values, mutable, gitignored. Written by the IPC
-//!   `update_bot_settings` command, read on every spawn.
+//! - `settings.toml` — values, mutable, gitignored. Written by
+//!   `update_bot_settings` and read on every spawn.
 //!
 //! Both files are optional. A bot that has neither runs unchanged — the
 //! subprocess simply doesn't see an `AKAGI_BOT_CONFIG` env var.
@@ -232,7 +232,7 @@ pub fn load_values(
 }
 
 /// Validate every entry in `values` against `manifest.settings`. Returns
-/// the first validation error. Used by IPC commands before persisting.
+/// the first validation error. Used by Web API operations before persisting.
 pub fn validate_all(
     manifest: &Manifest,
     values: &BTreeMap<String, serde_json::Value>,

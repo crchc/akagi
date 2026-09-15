@@ -15,12 +15,12 @@ import {
 import { Toaster } from '@/components/ui/sonner'
 import { InstallBlockingOverlay } from '@/components/InstallBlockingOverlay'
 import { NativeApiFields } from '@/components/NativeApiFields'
-import { invoke } from '@/lib/tauri'
+import { invoke } from '@/lib/api'
 import { withInstallBlock } from '@/lib/install'
 import { checkApiBeforeSave } from '@/lib/nativeApi'
 import { mergeExternal } from '@/lib/merge'
 import { withFirstRunCaptureDefault } from '@/lib/setupDefaults'
-import { useTauriBridge } from '@/hooks/useTauriBridge'
+import { useBackendBridge } from '@/hooks/useBackendBridge'
 import { useConfigStore } from '@/stores/configStore'
 import { ManifestField } from '@/components/ManifestField'
 import { GithubMark, DiscordMark } from '@/components/BrandMarks'
@@ -53,10 +53,8 @@ const BOT_3P_ASSET = 'release3p.zip'
 
 export function Setup() {
   const { t } = useTranslation()
-  // The wizard renders standalone (no <App> parent), so we wire the
-  // tauri event bridge + toast surface here ourselves. Without this the
-  // CfT download progress notifications wouldn't show up during setup.
-  useTauriBridge()
+  // Setup renders outside <App>, so it installs its own event bridge.
+  useBackendBridge()
   const stored = useConfigStore((s) => s.config)
   const setStored = useConfigStore((s) => s.setConfig)
   // Seed the editable draft. On a genuine first run this also pre-selects the

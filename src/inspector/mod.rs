@@ -5,24 +5,13 @@
 //! plumbing that gets pipeline events out of the proxy / bridge / mjai
 //! bus / bot manager and into one place.
 //!
-//! Design mirrors `crate::logger::stream` (and lives at the same lifetime
-//! tier — owned by `Session`):
+//! Design mirrors `crate::logger::stream` and is owned by `Session`:
 //!
 //! - One file: `<session>/inspector.jsonl`. Each line is a serialized
 //!   `schema::InspectorEntry`. Source of truth for past-session viewing.
-//! - One broadcast: `tokio::sync::broadcast::Sender<InspectorEntry>` of
-//!   capacity 1024. The IPC `subscribe_inspector` command grabs a
-//!   receiver per frontend channel; slow consumers see `Lagged(n)` and
-//!   the forwarder injects a synthetic record so the UI reflects the gap.
-//! - Single `InspectorWriter` cloned via `Arc` to every emitter
-//!   (proxy/handler.rs, capture/chromium/cdp.rs, mjai_bus subscriber,
-//!   bot manager). Writers serialize to disk synchronously, then
-//!   `try_send` the broadcast — file write is the durable path, the bus
-//!   is best-effort.
+//! - One bounded broadcast consumed by the Web SSE stream.
 //!
-//! Why disk-write before broadcast: the wire side is lossy by design
-//! (broadcast capacity), the file is not. If a slow frontend drops live
-//! entries, the user can still load the full session from disk.
+//! Disk is written first so a slow live consumer cannot lose persisted data.
 
 pub mod annotate;
 
@@ -55,8 +44,7 @@ struct Inner {
 
 impl InspectorWriter {
     /// Open `<dir>/<file_name>` for append and build the writer + a
-    /// broadcast `Sender`. The caller passes the same `Sender` into
-    /// `Session` so the IPC layer can hand out receivers later.
+    /// broadcast `Sender` retained by `Session` for SSE subscribers.
     pub fn open(path: &Path, capacity: usize) -> Result<(Self, InspectorBus)> {
         let file = OpenOptions::new().create(true).append(true).open(path)?;
         let (tx, _) = broadcast::channel(capacity);

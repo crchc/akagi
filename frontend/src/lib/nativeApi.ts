@@ -1,5 +1,5 @@
 import i18n from 'i18next'
-import { invoke } from '@/lib/tauri'
+import { invoke } from '@/lib/api'
 import { toast } from '@/components/ui/sonner'
 import { NATIVE_3P, NATIVE_4P } from '@/lib/nativeBots'
 import { useConfigStore } from '@/stores/configStore'

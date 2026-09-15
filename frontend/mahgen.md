@@ -24,8 +24,8 @@ The PNG load is async.
 
 ### Why every "obvious" approach fails
 
-1. **`zoom: 0.x` on the host.** Doesn't apply reliably in WebKitGTK (the Tauri
-   webview on Linux). Even when it works in Chromium, it's not portable.
+1. **`zoom: 0.x` on the host.** Browser implementations vary and the result
+   is not portable.
 
 4. **`max-width: 100%` on the inner `<img>` (set via shadow injection).**
    Circular dependency:

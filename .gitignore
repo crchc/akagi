@@ -33,9 +33,6 @@ mjai_bot/*/.venv/
 # Per-bot user-edited settings (manifest.toml ships with the bot; settings.toml does not)
 mjai_bot/*/settings.toml
 
-# Tauri
-gen/
-
 # Packaging output (scripts/package-zip.sh)
 dist/
 

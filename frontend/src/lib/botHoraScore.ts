@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { invoke, HAS_TAURI } from '@/lib/tauri'
+import { invoke, HAS_BACKEND } from '@/lib/api'
 import type { HoraScoreInfo } from '@/types'
 
 type Cached = { seq: number; info: HoraScoreInfo | null }
@@ -7,7 +7,7 @@ type Cached = { seq: number; info: HoraScoreInfo | null }
 const EMPTY: Cached = { seq: -1, info: null }
 
 /**
- * Score a hora bot decision via the `compute_bot_hora_score` Tauri command.
+ * Score a hora bot decision via the `compute_bot_hora_score` Web API command.
  * Re-runs whenever `seq` changes (the tagged-response sequence number from
  * notifyStore) so each new hora response triggers a fresh lookup.
  *
@@ -25,7 +25,7 @@ export function useBotHoraScore(
   const [cached, setCached] = useState<Cached>(EMPTY)
 
   useEffect(() => {
-    if (!active || !HAS_TAURI) return
+    if (!active || !HAS_BACKEND) return
     let cancelled = false
     invoke<HoraScoreInfo | null>('compute_bot_hora_score', {
       actor,

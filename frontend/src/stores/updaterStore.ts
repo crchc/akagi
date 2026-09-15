@@ -1,9 +1,9 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import { invoke } from '@/lib/tauri'
+import { invoke } from '@/lib/api'
 
 /// Mirrors `crate::updater::check::UpdateInfo` on the Rust side. The
-/// shape is fixed by the IPC contract — keep both ends in sync.
+/// shape is fixed by the API contract — keep both ends in sync.
 export type UpdateInfo = {
   current: string
   latest_tag: string
@@ -118,18 +118,14 @@ export const useUpdaterStore = create<UpdaterStore>()(
         set({ applying: true })
         try {
           // No payload: the backend applies the update it found during
-          // check_for_update (stashed server-side), so the webview can't
+          // check_for_update (stashed server-side), so the frontend can't
           // substitute URLs or trust markers.
           await invoke<void>('apply_update')
-          // Unreachable on success — the backend calls
-          // `AppHandle::restart` after a successful swap, which exits
-          // the current process.
+          // The backend exits after starting the updated binary.
           return null
         } catch (e) {
           set({ applying: false })
-          // Tauri serialises the `Result<_, UpdateError>` Err variant as
-          // a JS object — but very old failure paths (e.g. command not
-          // registered) might come back as a string. Normalise.
+          // The API attaches the structured UpdateError fields to Error.
           if (typeof e === 'object' && e !== null && 'kind' in e) {
             return e as UpdateError
           }

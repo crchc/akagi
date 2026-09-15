@@ -5,8 +5,6 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-const HOST = process.env.TAURI_DEV_HOST
-
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -18,13 +16,10 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
-    host: HOST || false,
-    hmr: HOST
-      ? { protocol: 'ws', host: HOST, port: 1421 }
-      : undefined,
-    watch: { ignored: ['**/src-tauri/**'] },
+    proxy: {
+      '/api': 'http://127.0.0.1:3000',
+    },
   },
-  envPrefix: ['VITE_', 'TAURI_'],
   test: {
     environment: 'jsdom',
     // Note: not `src/test/` — the repo's .gitignore has a bare `test` rule

@@ -99,16 +99,12 @@ pub struct Session {
     dir: PathBuf,
     binary_loggers: RwLock<HashMap<String, Arc<BinaryLogger>>>,
     _guards: Vec<WorkerGuard>,
-    /// Handle to the JSONL + broadcast layer. Kept on `Session` so the
-    /// IPC layer can call `subscribe_log_events` long after init, and so
-    /// the file handle survives any errant drops of the layer itself.
+    /// Handle to the JSONL + broadcast layer used by live log subscribers.
     stream: LogStreamHandle,
     /// Inspector writer (frames / mjai / bot reactions). Cloned out and
     /// passed to every emitter (`Session::inspector()` returns a clone).
     inspector_writer: InspectorWriter,
-    /// Inspector broadcast sender. `subscribe_inspector` IPC grabs a
-    /// receiver from this. Kept separately so subscribers don't have to
-    /// touch the writer.
+    /// Inspector broadcast sender used by live SSE subscribers.
     inspector_bus: InspectorBus,
 }
 
@@ -245,10 +241,7 @@ impl Session {
         self.dir.parent().unwrap_or(&self.dir)
     }
 
-    /// Subscribe to the live broadcast of `LogEntry` events. The IPC
-    /// `subscribe_log_events` command grabs one of these per frontend
-    /// channel; the stream is lossy under load (consumer-side `Lagged(n)`
-    /// surfaces as a synthetic warn entry to keep the UI honest).
+    /// Subscribe to live log entries. The stream is lossy under load.
     pub fn subscribe(&self) -> broadcast::Receiver<LogEntry> {
         self.stream.subscribe()
     }
@@ -260,9 +253,7 @@ impl Session {
         self.inspector_writer.clone()
     }
 
-    /// Subscribe to the live broadcast of `InspectorEntry` rows. Used by
-    /// the `subscribe_inspector` IPC command; same lossy semantics as the
-    /// log stream.
+    /// Subscribe to live `InspectorEntry` rows. Same lossy semantics as logs.
     pub fn subscribe_inspector(&self) -> broadcast::Receiver<InspectorEntry> {
         self.inspector_bus.subscribe()
     }

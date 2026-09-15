@@ -1,22 +1,10 @@
-//! `tracing` layer that publishes every event in two places at once:
+//! `tracing` layer that publishes every event in two places:
 //!
-//! - serialized as one JSON line into `<session>/all.jsonl` (the canonical
-//!   on-disk machine-readable log)
-//! - cloned onto a `tokio::sync::broadcast` channel that the IPC layer
-//!   forwards to the frontend log viewer over a `tauri::ipc::Channel`
+//! - one JSON line in `<session>/all.jsonl`;
+//! - a broadcast event consumed by the Web SSE stream.
 //!
-//! The point of doing both inside one layer is that the frontend's
-//! initial-load reader (`read_log_session`) and the live tail use a
-//! single canonical struct (`schema::LogEntry`) — there is no second
-//! formatter to keep in sync. The disk writer is synchronous (no
-//! `tracing-appender::non_blocking`) since the `broadcast` channel
-//! already gives us the async hop, and `serde_json` writes are small.
-//!
-//! Loss policy: the broadcast channel is bounded and lossy. Slow
-//! consumers (frontend that can't keep up with `RUST_LOG=trace` traffic)
-//! cause the receiver to see `RecvError::Lagged(n)`; the IPC forwarder
-//! injects a synthetic `WARN akagi.logger "dropped N events…"` entry so
-//! the UI never silently lies about completeness.
+//! Both paths use `schema::LogEntry`. The live stream is bounded and may skip
+//! events under load; the JSONL file remains complete.
 
 use crate::schema::LogEntry;
 use anyhow::Result;
@@ -32,10 +20,7 @@ use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::Layer;
 
-/// Handle to the layer's broadcast sender. Owned by `Session` so the IPC
-/// layer can call `subscribe()` long after the `Layer` itself has been
-/// moved into the `tracing` registry. The on-disk file handle stays
-/// inside the layer (which the registry keeps alive for process life).
+/// Handle retained by `Session` for live SSE subscribers.
 #[derive(Clone)]
 pub struct LogStreamHandle {
     tx: broadcast::Sender<LogEntry>,

@@ -13,7 +13,7 @@
   <i>「死ねば助かるのに………」 - 赤木しげる</i>
   <br/><br/>
   Real-time mahjong AI assistant for <b>Mahjong Soul</b>, <b>Tenhou</b>, and more.<br/>
-  Akagi V3: A single-binary Rust + Tauri rewrite of
+  Akagi V3: A single-binary Rust + Web rewrite of
   <a href="https://github.com/shinkuan/Akagi/tree/v2">Akagi</a> and
   <a href="https://github.com/Xe-Persistent/Akagi-NG">AkagiNG</a>.
   <br/><br/>
@@ -173,9 +173,9 @@ moving / copying / deleting the folder.
 
 | OS | File | Notes |
 |---|---|---|
-| Windows | `akagi-<version>-windows-x64.zip` | x86_64. Requires WebView2 (preinstalled on Win10 1803+ / Win11). SmartScreen will warn — *More info → Run anyway*. |
+| Windows | `akagi-<version>-windows-x64.zip` | x86_64. SmartScreen will warn — *More info → Run anyway*. |
 | macOS | `akagi-<version>-macos-arm64.zip` | Apple Silicon. Unsigned: run `xattr -cr <unzipped folder>` once, or right-click → *Open* the first time. |
-| Linux | `akagi-<version>-linux-x64.zip` | Built on `ubuntu-22.04` (glibc 2.35+). Requires WebKit2GTK 4.1 (`apt install libwebkit2gtk-4.1-0` / `dnf install webkit2gtk4.1` / `pacman -S webkit2gtk-4.1`). |
+| Linux | `akagi-<version>-linux-x64.zip` | Built on `ubuntu-22.04` (glibc 2.35+). |
 
 On first launch the **Setup wizard** walks you through language,
 platform, capture mode, bot settings, and CA trust (only if you choose
@@ -299,8 +299,8 @@ The frontend's **History** tab shows:
   icon deletes both the index entry and the per-game `.mjai.jsonl`.
 
 PT-rule and filter selections persist to `localStorage`. Records load
-from the backend on bridge boot and stay current via the
-`history-recorded` Tauri event.
+from the backend at startup and stay current via the
+`history-recorded` SSE event.
 
 See [`src/history/README.md`](./src/history/README.md) for the math,
 the storage schema, and how to add a new platform / stat field /
@@ -426,28 +426,14 @@ other. [`src/event_bus.rs`](./src/event_bus.rs) is the single source of
 truth for channel types.
 
 ```
-                ┌────────────────────────┐
-   Game client ─│  capture (mitm | cdp)  │── CA at ./ca (mitm only)
-   WebSocket    └─────────┬──────────────┘
-                          ▼
-                ┌────────────────────────┐
-                │  bridge::<platform>    │   wire bytes → MjaiEvent
-                └─────────┬──────────────┘
-                          ▼ MjaiBus
-       ┌──────────────────┼──────────────────┐
-       ▼                  ▼                  ▼
-  game_state::tracker   bot::manager     ipc forwarder
-       │                  │                  │
-       ▼ PostBus          ▼ BotResponseBus   ▼ app.emit
-  analysis::runner   built-in NN (in-proc) Tauri webview
-       │             | cloud API
-       ▼ AnalysisBus  | mjai subprocess
-       └──► ipc forwarder ──► app.emit
+Game client → capture → bridge → event buses
+                                   ├→ tracker / bot / analysis / autoplay
+                                   └→ Web SSE → browser
+Browser → HTTP commands → backend
 ```
 
 [`src/lib.rs`](./src/lib.rs) wires the buses on boot. The frontend
-talks to the backend over push events (`mjai-event`, `bot-response`,
-`bot-status`, …) and a set of pull commands, both documented in
+talks to the backend over SSE events and HTTP commands, documented in
 [`src/ipc/README.md`](./src/ipc/README.md). With AutoPlay on, the
 `autoplay` manager consumes the bot's decisions and performs them
 through the Chromium capture backend (CDP) — clicking the table on
@@ -458,7 +444,7 @@ Tenhou, whose client protocol is plain enough to speak directly.
 
 | Layer | Tech |
 |---|---|
-| Shell | [Tauri](https://tauri.app) 2 |
+| Shell | [Axum](https://github.com/tokio-rs/axum) HTTP/SSE |
 | Backend | Rust (edition 2021), `tokio`, `tracing`, `clap` |
 | MITM | [`hudsucker`](https://crates.io/crates/hudsucker) 0.24 (`rcgen-ca`, `rustls-client`) |
 | CDP capture | [`chromiumoxide`](https://crates.io/crates/chromiumoxide) 0.9 |
@@ -493,10 +479,10 @@ Tenhou, whose client protocol is plain enough to speak directly.
 │   ├── github/        GitHub Releases client (bot install, self-update)
 │   ├── history/       Game replay storage + index
 │   ├── inspector/     Frame / event / bot-reaction broadcaster
-│   ├── ipc/           Tauri commands, app state, capture supervisor
+│   ├── ipc/           HTTP commands, app state, capture supervisor
 │   ├── logger/        Per-session log dir + per-target file appenders
 │   ├── proxy/         MITM HTTP/HTTPS/WS via hudsucker; CA at ./ca
-│   ├── schema/        MjaiEvent enum + IPC payload types
+│   ├── schema/        MjaiEvent enum + API payload types
 │   ├── updater/       In-app self-update (check + apply)
 │   └── lib.rs         Boot / wiring
 ├── native_bot/        Built-in bot crate: obs/action codec, candle CNN, embedded weights
@@ -509,9 +495,6 @@ Tenhou, whose client protocol is plain enough to speak directly.
 │       ├── stores/    Zustand stores, one per domain (game, bot, config, theme, …)
 │       └── i18n/      en / ja / zh-TW / zh-CN
 ├── tests/             Integration tests
-├── capabilities/      Tauri permissions
-├── icons/             App icons
-├── tauri.conf.json    Window + bundle config
 └── Cargo.toml
 ```
 
@@ -545,7 +528,7 @@ disabled until the environment is ready.
 
 The **Bots** tab installs a bot from a GitHub release or a local ZIP.
 
-The IPC command `install_bot_from_github(repo, asset_glob?, name?)` fetches the
+The Web API operation `install_bot_from_github(repo, asset_glob?, name?)` fetches the
 latest release zip, extracts it under `mjai_bot/<name>/`, validates `bot.py`,
 and runs `uv sync` once. Subsequent launches are fast — the sync is gated by a
 stamp at `mjai_bot/<name>/.akagi/synced.stamp`.
@@ -568,26 +551,21 @@ it under `mjai_bot/<name>/` does **not** make Akagi a derived work of the bot.
 
 - Rust (latest stable, 1.80+)
 - Node.js 20+ and npm
-- Tauri 2 system deps:
-  - **Linux**: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
-    `libayatana-appindicator3-dev`, `librsvg2-dev`,
-    `protobuf-compiler`
-  - **macOS**: Xcode Command Line Tools
-  - **Windows**: WebView2 (preinstalled on Windows 11)
+- No desktop GUI system libraries are required.
 
 **Run / build**
 
 ```bash
-# Debug — launches the GUI; Vite dev-server proxied by Tauri
+# Build the Web UI, then run the local server on port 3000
+npm ci --prefix frontend && npm run --prefix frontend build
 cargo run
 
 # Pass a custom config path
 cargo run -- --config ./my-config.toml
 
 # Build a portable zip for the current target
-cargo install tauri-cli --locked          # if not already installed
 bash scripts/fetch-runtime.sh             # populate runtime/<triple>/
-cargo tauri build --no-bundle             # writes target/<triple>/release/akagi
+cargo build --release             # writes target/<triple>/release/akagi
 bash scripts/package-zip.sh <target-triple>
 # → dist/akagi-<version>-<os>-<arch>.zip
 

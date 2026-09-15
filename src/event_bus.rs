@@ -1,27 +1,5 @@
-//! In-process broadcast buses connecting Akagi's subsystems.
-//!
-//! Five buses, all `tokio::sync::broadcast::Sender`-typed:
-//!
-//! - [`MjaiBus`]: every `MjaiEvent` parsed by a platform bridge is fanned
-//!   out here. Producers: bridge → proxy handler. Consumers: `BotManager`,
-//!   `ipc` forwarder, future HUD/storage/WS server.
-//! - [`BotResponseBus`]: every `BotResponse` from the active `BotRunner`.
-//!   Producer: `BotManager`. Consumers: `ipc` forwarder, future HUD /
-//!   external WS / replay recorder.
-//! - [`BotStatusBus`]: lifecycle of the active bot subprocess
-//!   (`Idle/Loading/Ready/Error/Stopped`). Producer: `BotManager`.
-//!   Consumer: `ipc` forwarder (UI loading spinner).
-//! - [`CaptureStatusBus`]: lifecycle of the active capture backend
-//!   (`Stopped/Starting/Running/Error` × `kind: Mitm | Chromium`).
-//!   Producer: `ipc::commands` / capture supervisor. Consumer: `ipc`
-//!   forwarder.
-//! - [`NotifyBus`]: ad-hoc toast notifications. Any subsystem may push;
-//!   `ipc` forwards to the frontend as `notify` events.
-//!
-//! Channel capacity is fixed-size — slow consumers see `RecvError::Lagged`
-//! rather than blocking the producer. That's the right trade-off for a
-//! real-time analyzer: if the HUD falls behind, drop and resync rather
-//! than stall the proxy.
+//! Bounded in-process broadcast buses shared by capture, analysis, bots, and
+//! the Web SSE stream. Slow consumers may lag without blocking producers.
 
 use crate::analysis::result::AnalysisResult;
 use crate::bot::BotResponse;
@@ -44,7 +22,6 @@ pub type CaptureStatusBus = broadcast::Sender<CaptureStatus>;
 pub type NotifyBus = broadcast::Sender<Notification>;
 
 /// Fan-out for `AnalysisResult`s produced after each game-state update.
-/// Producer: `analysis::runner`. Consumers: `ipc` forwarder, future HUD.
 pub type AnalysisBus = broadcast::Sender<AnalysisResult>;
 
 /// One `MjaiEvent` as re-emitted after the `GameTracker` applied it.
@@ -74,10 +51,7 @@ pub struct TrackedEvent {
 /// ordering against the tracker is racy).
 pub type PostTrackerBus = broadcast::Sender<TrackedEvent>;
 
-/// Fan-out for game-history lifecycle events. Producer:
-/// `crate::history::recorder` (on each finalised game / deletion).
-/// Consumer: `ipc` forwarder, which emits `history-recorded` to the
-/// frontend.
+/// Fan-out for game-history additions and deletions.
 pub type HistoryBus = broadcast::Sender<HistoryEvent>;
 
 /// Default capacity. Live pacing produces ~1 second of mjai events at a time

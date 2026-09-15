@@ -12,10 +12,7 @@ import type { LogEntry, LogSessionInfo } from '@/types'
  *
  * The ring is capped at `MAX_ENTRIES`. Once full, older entries are
  * discarded oldest-first. This bounds memory under a `RUST_LOG=trace`
- * storm; the matching session-side cap on the broadcast channel is 1024
- * (in `LogStreamLayer`), so a slow UI causes drops at the channel layer
- * before this buffer overruns. Drops are surfaced as synthetic WARN
- * entries injected by `subscribe_log_events`.
+ * storm. The server's broadcast channel is bounded separately.
  */
 const MAX_ENTRIES = 5000
 

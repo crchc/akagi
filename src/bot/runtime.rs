@@ -1,17 +1,4 @@
-//! Python interpreter + `uv` locator and per-bot venv sync.
-//!
-//! Two modes:
-//!
-//! - **Bundled**: `runtime/python/<triple>/...` and `runtime/uv/<triple>/uv`
-//!   ship next to the binary in the portable zip distribution. The locator
-//!   checks the exe-adjacent layout first; the Tauri-managed
-//!   `app.path().resource_dir()` is checked as a secondary fallback so
-//!   `cargo run` from a checkout (and any future Tauri-bundled target) keeps
-//!   working. Zero Python install required for end users.
-//! - **System**: `python3` and `uv` are looked up on `PATH` via the `which`
-//!   crate. Used during development (`cargo run` from a checkout without a
-//!   populated `runtime/`) and as a graceful fallback if the bundled
-//!   binaries are missing.
+//! Locate bundled or system Python/uv and manage per-bot virtual environments.
 //!
 //! Per-bot venvs live under `<bot_dir>/.akagi/venv` so they don't clash with
 //! a developer's own `.venv` if they happen to keep one in the bot folder.
@@ -32,7 +19,7 @@ const AKAGI_DIR: &str = ".akagi";
 /// Origin of the python + uv binaries this runtime points at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeMode {
-    /// Bundled python-build-standalone + uv from the Tauri resource dir.
+    /// Bundled python-build-standalone + uv from beside the executable.
     Bundled,
     /// `python3` + `uv` discovered on `PATH`. Dev-mode fallback.
     System,
@@ -53,26 +40,10 @@ impl PythonRuntime {
         Self { python, uv, mode }
     }
 
-    /// Locate bundled binaries first, then fall back to system PATH.
-    ///
-    /// Lookup order:
-    /// 1. **Exe-adjacent**: `<exe_parent>/runtime/{python,uv}/<triple>/...` —
-    ///    this is the portable zip layout users get from Releases.
-    /// 2. **Resource dir**: the Tauri-managed `app.path().resource_dir()` —
-    ///    secondary fallback so `cargo run` and any future Tauri-bundled
-    ///    install (`/usr/lib/akagi/`, `.app/Contents/Resources/`) keep
-    ///    working.
-    /// 3. **System PATH**: `python3` and `uv` resolved via the `which` crate.
-    ///
-    /// Pass `None` for `resource_dir` outside Tauri (tests, CLI tools).
-    pub fn locate(resource_dir: Option<&Path>) -> Result<Self> {
+    /// Locate the executable-adjacent bundle, then fall back to `PATH`.
+    pub fn locate() -> Result<Self> {
         if let Some(rt) = try_bundled_exe_adjacent() {
             return Ok(rt);
-        }
-        if let Some(rd) = resource_dir {
-            if let Some(rt) = try_bundled(rd) {
-                return Ok(rt);
-            }
         }
         try_system().context("no bundled runtime found and neither `python3` nor `uv` is on PATH")
     }
@@ -92,6 +63,7 @@ impl PythonRuntime {
     /// Run `uv sync` against the bot's `pyproject.toml` if the on-disk
     /// signature has changed since the last successful sync. Idempotent.
     pub async fn ensure_synced(&self, bot_dir: &Path) -> Result<()> {
+        let bot_dir = absolute_bot_dir(bot_dir)?;
         let pyproject = bot_dir.join("pyproject.toml");
         if !pyproject.is_file() {
             bail!(
@@ -142,7 +114,7 @@ impl PythonRuntime {
                         bot = %bot_dir.display(),
                         "venv repoint failed ({e:#}); wiping for full re-sync"
                     );
-                    reset_sync_state(bot_dir).await;
+                    reset_sync_state(&bot_dir).await;
                 }
             }
         }
@@ -157,16 +129,25 @@ impl PythonRuntime {
         sync_cmd
             .arg("sync")
             .arg("--project")
-            .arg(bot_dir)
+            .arg(&bot_dir)
             .env("UV_PYTHON", &self.python)
             .env("UV_PROJECT_ENVIRONMENT", &venv);
         scrub_python_env(&mut sync_cmd);
-        let status = sync_cmd
-            .status()
+        let output = sync_cmd
+            .output()
             .await
             .with_context(|| format!("spawn `uv` at {}", self.uv.display()))?;
-        if !status.success() {
-            bail!("uv sync failed in {} ({status})", bot_dir.display());
+        if !output.status.success() {
+            let error = String::from_utf8_lossy(&output.stderr);
+            let error = error.trim();
+            if error.is_empty() {
+                bail!(
+                    "uv sync failed in {} ({})",
+                    bot_dir.display(),
+                    output.status
+                );
+            }
+            bail!("uv sync failed in {}: {error}", bot_dir.display());
         }
 
         // `uv sync` creates (or refreshes) `uv.lock`, so the `current`
@@ -185,13 +166,19 @@ impl PythonRuntime {
     /// Build a `tokio::process::Command` that runs the venv's python with
     /// the given args, with `current_dir` set to the bot directory so
     /// `bot.py` can resolve relative paths.
-    pub fn command_for(&self, bot_dir: &Path, args: &[&str]) -> Command {
+    pub fn command_for(&self, bot_dir: &Path, args: &[&str]) -> Result<Command> {
+        let bot_dir = absolute_bot_dir(bot_dir)?;
         let py = venv_python(&bot_dir.join(AKAGI_DIR).join(VENV_DIR));
         let mut cmd = Command::new(py);
         cmd.current_dir(bot_dir).args(args);
         scrub_python_env(&mut cmd);
-        cmd
+        Ok(cmd)
     }
+}
+
+fn absolute_bot_dir(bot_dir: &Path) -> Result<PathBuf> {
+    std::path::absolute(bot_dir)
+        .with_context(|| format!("resolve bot directory {}", bot_dir.display()))
 }
 
 /// Drop Python env vars that the AppImage runtime (and some AUR
@@ -289,11 +276,6 @@ pub async fn reset_sync_state(bot_dir: &Path) {
 /// executable. This is the layout shipped by the portable zip
 /// distribution: `<exe_parent>/runtime/{python,uv}/<triple>/...`.
 ///
-/// On Linux/macOS, `tauri::path::resource_dir()` does not return
-/// exe-adjacent paths in a portable layout — it tries Tauri-bundled
-/// install locations like `/usr/lib/akagi/` and returns `Err` or a
-/// non-existent path otherwise. Checking exe-adjacent here ensures the
-/// portable zip works without depending on Tauri's resource resolution.
 fn try_bundled_exe_adjacent() -> Option<PythonRuntime> {
     let exe = std::env::current_exe().ok()?;
     let exe_dir = exe.parent()?;
@@ -324,11 +306,16 @@ fn try_bundled(resource_dir: &Path) -> Option<PythonRuntime> {
 }
 
 fn try_system() -> Result<PythonRuntime> {
-    let python = which::which("python3")
-        .or_else(|_| which::which("python"))
-        .context("locate python3/python on PATH")?;
+    let python = find_system_python(|name| which::which(name).ok())
+        .context("locate python3.12/python3/python on PATH")?;
     let uv = which::which("uv").context("locate uv on PATH")?;
     Ok(PythonRuntime::from_paths(python, uv, RuntimeMode::System))
+}
+
+fn find_system_python(mut find: impl FnMut(&str) -> Option<PathBuf>) -> Option<PathBuf> {
+    ["python3.12", "python3", "python"]
+        .into_iter()
+        .find_map(&mut find)
 }
 
 /// The venv's interpreter path for this platform's layout.
@@ -531,6 +518,12 @@ mod tests {
         )
     }
 
+    #[test]
+    fn system_runtime_prefers_python_312() {
+        let found = find_system_python(|name| Some(PathBuf::from(name))).unwrap();
+        assert_eq!(found, PathBuf::from("python3.12"));
+    }
+
     #[tokio::test]
     async fn ensure_synced_bails_when_pyproject_missing() {
         let tmp = TempDir::new().unwrap();
@@ -601,12 +594,7 @@ mod tests {
         assert!(try_bundled(tmp.path()).is_none());
     }
 
-    /// Regression: portable zip relies on `try_bundled_exe_adjacent` to
-    /// find `<exe_parent>/runtime/...` because Tauri's `resource_dir()`
-    /// doesn't return exe-adjacent on Linux/macOS in a portable layout.
-    /// In the test runner the binary lives in `target/<profile>/deps/`
-    /// with no `runtime/` next to it, so this must return `None` (and
-    /// must not panic on the optional chain).
+    /// A missing executable-adjacent runtime is a normal development setup.
     #[test]
     fn try_bundled_exe_adjacent_returns_none_when_runtime_missing() {
         assert!(try_bundled_exe_adjacent().is_none());
@@ -624,8 +612,16 @@ mod tests {
     fn command_for_strips_pythonhome_and_pythonpath() {
         use std::ffi::OsStr;
         let rt = dummy_runtime();
-        let tmp = TempDir::new().unwrap();
-        let cmd = rt.command_for(tmp.path(), &["bot.py"]);
+        let tmp = tempfile::Builder::new()
+            .prefix(".akagi-relative-command-")
+            .tempdir_in(".")
+            .unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let bot = tmp.path().strip_prefix(cwd).unwrap();
+        assert!(bot.is_relative());
+        let cmd = rt.command_for(bot, &["bot.py"]).unwrap();
+        assert!(cmd.as_std().get_current_dir().unwrap().is_absolute());
+        assert!(Path::new(cmd.as_std().get_program()).is_absolute());
         let envs: Vec<(&OsStr, Option<&OsStr>)> = cmd.as_std().get_envs().collect();
         assert!(
             envs.iter()
@@ -1021,19 +1017,21 @@ mod tests {
         );
     }
 
-    /// Regression (issue #143): `uv sync` creates/refreshes `uv.lock`, so the
-    /// stamp must be written from the POST-sync on-disk signature, not the
-    /// pre-sync one. A bot that ships no lockfile (the common hand-written
-    /// case) otherwise reads as not-ready immediately after a successful sync —
-    /// its activation toggle stays disabled until a second sync. Uses a fake
-    /// `uv` that reproduces the real side effects: it seeds the venv and writes
-    /// a `uv.lock` into the project dir.
+    /// Covers both post-sync lockfile stamping and relative configured bot
+    /// directories. `UV_PROJECT_ENVIRONMENT` is resolved relative to the
+    /// project by uv, so passing `mjai_bot/foo/.akagi/venv` while the project is
+    /// `mjai_bot/foo` creates a duplicated `mjai_bot/foo/mjai_bot/foo` tree.
     #[cfg(unix)]
     #[tokio::test]
-    async fn ensure_synced_marks_ready_when_uv_creates_lockfile() {
+    async fn ensure_synced_resolves_relative_bot_dir_before_running_uv() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = TempDir::new().unwrap();
-        let bot = tmp.path();
+        let tmp = tempfile::Builder::new()
+            .prefix(".akagi-relative-sync-")
+            .tempdir_in(".")
+            .unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let bot = tmp.path().strip_prefix(cwd).unwrap();
+        assert!(bot.is_relative());
         write(&bot.join("pyproject.toml"), "[project]\nname='a'\n");
         // No uv.lock shipped — the (fake) uv will create it during sync.
         assert!(!bot.join("uv.lock").exists());

@@ -16,10 +16,7 @@ use serde::Serialize;
 /// the bytes we need to actually start a download (`asset_url`, plus the
 /// optional `asset_digest_sha256` for integrity verification).
 ///
-/// Serialize-only by design: the frontend never hands this back.
-/// `apply_update` reads the copy stashed in `AppState::pending_update`,
-/// because `asset_url` / `sig_url` / `meta_source` are security policy
-/// inputs and a compromised webview must not get to assert them.
+/// Serialize-only: `apply_update` uses the copy cached in `AppState`.
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateInfo {
     /// Version we're running right now (`env!("CARGO_PKG_VERSION")`).

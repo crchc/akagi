@@ -119,7 +119,7 @@ impl AutoplayManager {
         let advance_cfg = self.cfg.clone();
         let advance_inject = self.ctx.inject.clone();
         let advance_bus = self.mjai_bus.clone();
-        tauri::async_runtime::spawn(async move {
+        tokio::spawn(async move {
             crate::autoplay::riichi_city::round_advance::round_advance_watcher(
                 advance_cfg,
                 advance_inject,
@@ -333,7 +333,7 @@ impl AutoplayManager {
             let window_open_at_plan = inject.window_is_open();
             let window_at_plan = inject.window_opened_at();
             let plan_created = Instant::now();
-            tauri::async_runtime::spawn(async move {
+            tokio::spawn(async move {
                 execute_riichi_frame(
                     sleep_ms as u64,
                     frame,
@@ -578,6 +578,21 @@ impl AutoplayManager {
                         "The declaration press was lost and the tile was discarded without it. This hand is not in riichi — and the bot may still believe it declared, so its reads for the rest of this hand can be off.",
                     ),
                 );
+            }
+        }
+
+        if let Some(rect) = rect {
+            let page = self.ctx.page.read().await;
+            if let Some(page) = page.as_ref() {
+                let x = rand::random_range(4.0..12.0);
+                let y = rand::random_range(2.25..6.75);
+                let (x, y) = rect.pixel(x, y);
+                if let Err(e) = page
+                    .move_mouse(chromiumoxide::layout::Point::new(x, y))
+                    .await
+                {
+                    warn!("autoplay: failed to move mouse after action: {e:#}");
+                }
             }
         }
     }
@@ -1158,8 +1173,7 @@ async fn execute_riichi_frame(
     }
 }
 
-/// Spawn point for the autoplay loop. Wired by `crate::lib::run` so the
-/// `tauri::async_runtime` Tokio runtime is the host.
+/// Run the autoplay loop.
 pub async fn run_autoplay_manager(
     cfg: Arc<RwLock<AppConfig>>,
     ctx: Arc<AutoplayContext>,

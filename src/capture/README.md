@@ -3,7 +3,7 @@
 `crate::capture` is the transport layer that supplies binary WebSocket
 frames to `crate::bridge::Bridge` (the protocol parser). Two backends
 share one trait so the rest of the app — bot manager, game tracker,
-analysis runner, IPC forwarders — never sees which capture mode is
+analysis runner, Web API — never sees which capture mode is
 running.
 
 ## Backends

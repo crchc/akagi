@@ -18,19 +18,8 @@
 //! which. Not asking also spends a full inference round-trip, and on the
 //! cloud path a paid API call, on events with no decision in them.
 //!
-//! ## Status & notification emission
-//!
-//! Every lifecycle transition is published to two side-channel buses for
-//! the IPC layer:
-//!
-//! - `BotStatusBus` — typed state machine
-//!   (`Idle/Loading/Ready/Error/Stopped`). The frontend renders a spinner
-//!   on `Loading{SyncingDeps}` so the user knows the slow first-run
-//!   `uv sync` is in progress, not a hang.
-//! - `NotifyBus` — toast-style notifications. Loading and error events
-//!   reuse the same `id` (`"bot-loading-<name>"`) so the sticky
-//!   "preparing" toast is replaced rather than duplicated when the spawn
-//!   resolves.
+//! Lifecycle transitions go to `BotStatusBus`; user-facing messages go to
+//! `NotifyBus`.
 
 use crate::bot::manifest;
 use crate::bot::registry::BotRegistry;
@@ -98,7 +87,7 @@ pub struct BotManager {
     /// the Logs → Inspector tab can replay "trigger event → bot action"
     /// pairings without grepping multiple files.
     inspector: InspectorWriter,
-    /// Shared with the IPC layer so a user-triggered Reinstall environment
+    /// Shared with the Web API so a user-triggered Reinstall environment
     /// and an in-flight game-start sync can't run `uv sync` against the same
     /// venv simultaneously.
     syncs_in_flight: Arc<Mutex<HashSet<String>>>,
@@ -151,7 +140,7 @@ impl BotManager {
     /// when the proxy stops producing.
     pub async fn run(mut self, mut rx: broadcast::Receiver<TrackedEvent>) -> Result<()> {
         info!("bot manager subscribed to post-tracker bus; waiting for start_game (active bot is read from config at each start_game)");
-        // Surface the initial state to any IPC consumer that subscribes
+        // Surface the initial state to consumers that subscribe
         // late. Send is no-op when no subscribers exist yet.
         self.emit_status(BotStatus::Idle);
         loop {
@@ -384,7 +373,7 @@ impl BotManager {
         Ok(())
     }
 
-    /// Two-phase spawn so the IPC layer can show a "Syncing deps…" spinner
+    /// Two-phase spawn so the frontend can show a "Syncing deps…" spinner
     /// during the slow first-run path before the subprocess actually
     /// starts. Each branch publishes status + notification before
     /// returning so the UI never sees a stuck `Loading` state.
@@ -526,7 +515,7 @@ impl BotManager {
                 .id(load_id.clone()),
         );
 
-        // Acquire the per-bot sync lock so a Reinstall-environment IPC
+        // Acquire the per-bot sync lock so a Reinstall-environment API
         // call (or any other in-flight sync) doesn't race us against the
         // same venv.
         let sync_guard = match SyncGuard::acquire(&self.syncs_in_flight, &bot_name).await {
@@ -568,7 +557,7 @@ impl BotManager {
             stage: LoadStage::Spawning,
         });
 
-        let mut cmd = runtime.command_for(&entry.dir, &["bot.py"]);
+        let mut cmd = runtime.command_for(&entry.dir, &["bot.py"])?;
         cmd.arg(actor_id.to_string());
 
         // If the bot ships a manifest, resolve user values + manifest

@@ -44,7 +44,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { invoke } from '@/lib/tauri'
+import { invoke } from '@/lib/api'
 import { openExternal } from '@/lib/external'
 import { roomLabelKey } from '@/lib/matchInfo'
 import { useConfigStore } from '@/stores/configStore'

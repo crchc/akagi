@@ -1,9 +1,9 @@
 // Game-history Zustand store + persisted PT-rule preference.
 //
 // Shape: a denormalised cache of `GameRecord[]` plus the active filter
-// and the user's chosen PT rule. Records are loaded once on bridge
+// and the user's chosen PT rule. Records are loaded once on app
 // startup via `invoke('list_game_history')` and updated incrementally
-// via the `history-recorded` Tauri event. Filtering happens in-memory
+// via the `history-recorded` SSE event. Filtering happens in-memory
 // (the page is filter-driven and the dataset is small enough to scan).
 //
 // The PT rule and filter live in the same store so a re-render of the

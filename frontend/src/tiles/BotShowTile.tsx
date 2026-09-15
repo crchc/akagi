@@ -19,8 +19,6 @@ export function BotShowTile({ bp }: { bp: Breakpoint }) {
   }, [responses])
 
   const rowRef = useRef<HTMLOListElement>(null)
-  // The dashboard tile has room for the bot's full candidate list; only the
-  // overlay caps it.
   const items = visibleItems(show)
 
   return (

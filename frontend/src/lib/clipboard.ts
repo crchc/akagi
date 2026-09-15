@@ -1,8 +1,8 @@
 /**
  * Copy `text` to the system clipboard. Prefers the async Clipboard API
- * (available in WebView2 / WebKitGTK when invoked from a user gesture) and
+ * (available in secure browsers when invoked from a user gesture) and
  * falls back to the deprecated-but-ubiquitous `execCommand('copy')` path for
- * webviews that gate `navigator.clipboard` behind permissions Akagi doesn't
+ * browsers that gate `navigator.clipboard` behind permissions Akagi doesn't
  * request. Returns whether a copy was actually performed, so callers can
  * toast success/failure honestly.
  */

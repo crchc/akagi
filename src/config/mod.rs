@@ -5,7 +5,6 @@ mod general;
 mod logging;
 mod merge;
 mod network;
-mod overlay;
 mod platform;
 mod proxy;
 
@@ -18,7 +17,6 @@ pub use general::GeneralConfig;
 pub use logging::LoggingConfig;
 pub use merge::merge_into;
 pub use network::{GithubMirrorMode, NetworkConfig};
-pub use overlay::{OverlayConfig, TOP_N_MAX, TOP_N_MIN};
 pub use platform::{Platform, PlatformConfig};
 pub use proxy::ProxyConfig;
 
@@ -35,7 +33,6 @@ pub struct AppConfig {
     pub bot: BotConfig,
     pub capture: CaptureConfig,
     pub autoplay: AutoplayConfig,
-    pub overlay: OverlayConfig,
     pub network: NetworkConfig,
 }
 

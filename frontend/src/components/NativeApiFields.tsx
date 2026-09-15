@@ -31,7 +31,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { invoke } from '@/lib/tauri'
+import { invoke } from '@/lib/api'
 import { toast } from '@/components/ui/sonner'
 import { PurchaseDialog } from '@/components/PurchaseDialog'
 import { useConfigStore } from '@/stores/configStore'

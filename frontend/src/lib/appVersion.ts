@@ -1,21 +1,8 @@
-import { getVersion } from '@tauri-apps/api/app'
-import { HAS_TAURI } from '@/lib/tauri'
-
-// Fallback used in the browser dev preview (no Tauri runtime → no
-// app.getVersion). Lines up with Cargo.toml so devs see a sensible
-// string until the real version resolves. The release tagging script
-// rewrites this line on every release — keep the exact
-// `const VERSION_FALLBACK = '…'` shape it greps for.
+// scripts/tag_release.sh rewrites this exact declaration.
 export const VERSION_FALLBACK = '3.7.1'
 
-/** Resolve the running app version, falling back for browser previews. */
 export async function getAppVersion(): Promise<string> {
-  if (!HAS_TAURI) return VERSION_FALLBACK
-  try {
-    return await getVersion()
-  } catch {
-    return VERSION_FALLBACK
-  }
+  return VERSION_FALLBACK
 }
 
 /**

@@ -1,9 +1,4 @@
-//! `#[tauri::command]` handlers exposed to the frontend.
-//!
-//! Errors are returned as `String` because Tauri serializes command
-//! errors via `Display` and most call sites just want a human message in
-//! a toast. Keep the JSON shape conservative — clients lock onto field
-//! names quickly and renames break dashboards.
+//! Operations exposed by the local Web API.
 
 use crate::analysis::result::AnalysisResult;
 use crate::bot::install::{self, GithubInstallSpec, LocalZipInstallSpec};
@@ -17,7 +12,6 @@ use crate::game_state::snapshot::GameStateSnapshot;
 use crate::ipc::capture_supervisor::{
     restart_capture as restart_capture_inner, spawn_capture_supervisor,
 };
-use crate::ipc::overlay;
 use crate::ipc::state::AppState;
 use crate::schema::{
     BotInfo, BotSettings, GameRecord, HistoryEvent, HistoryEventLog, HistoryFilter, HoraScoreInfo,
@@ -27,7 +21,7 @@ use crate::schema::{
 use crate::util::resolve_dir;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, State};
+type State<'a, T> = &'a T;
 
 /// Returns `true` exactly once per process the first time `bot_enabled`
 /// is observed as `true` here. Side-effect on success: flips `flag`
@@ -68,7 +62,6 @@ fn entry_to_info(e: &BotEntry) -> BotInfo {
 
 type CmdResult<T> = Result<T, String>;
 
-#[tauri::command]
 pub async fn get_config(state: State<'_, AppState>) -> CmdResult<AppConfig> {
     Ok(state.config.read().await.clone())
 }
@@ -82,12 +75,7 @@ pub async fn get_config(state: State<'_, AppState>) -> CmdResult<AppConfig> {
 /// started the manager runs for the lifetime of the process (toggling
 /// `bot.enabled` back to false still requires a relaunch to actually
 /// stop it).
-#[tauri::command]
-pub async fn update_config(
-    new_config: AppConfig,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> CmdResult<()> {
+pub async fn update_config(new_config: AppConfig, state: State<'_, AppState>) -> CmdResult<()> {
     persist_config(&new_config, &state.config_path).map_err(|e| e.to_string())?;
 
     // Snapshot the *previous* capture-relevant fields before we overwrite,
@@ -102,11 +90,7 @@ pub async fn update_config(
     let new_platform = new_config.platform.kind;
     let bot_now_enabled = new_config.bot.enabled;
     let autoplay_now_enabled = new_config.autoplay.enabled;
-    let new_overlay = new_config.overlay.clone();
     *state.config.write().await = new_config;
-
-    // Open / close / retune the overlay window to match what was just saved.
-    overlay::reconcile(&app, &new_overlay);
 
     // Sync the history recorder's platform tag immediately. Subsequent
     // finalised games are stamped with the new tag; the in-flight buffer
@@ -123,7 +107,7 @@ pub async fn update_config(
         // Run the restart in the background — `update_config` returns
         // promptly so the UI doesn't hang on slow shutdowns.
         let st = (*state).clone();
-        tauri::async_runtime::spawn(async move {
+        tokio::spawn(async move {
             if let Err(e) = restart_capture_inner(st).await {
                 let _ = ();
                 tracing::error!("auto-restart capture failed: {e:#}");
@@ -158,7 +142,7 @@ pub async fn update_config(
         let rt = state.runtime.clone();
         let syncs = state.syncs_in_flight.clone();
         let started_flag = state.bot_manager_started.clone();
-        tauri::async_runtime::spawn(async move {
+        tokio::spawn(async move {
             if let Err(e) =
                 crate::bot::run_bot_manager(cfg_for_bot, events, resp, bs, nb, inspector, rt, syncs)
                     .await
@@ -185,7 +169,7 @@ pub async fn update_config(
             .map(std::path::Path::to_path_buf)
             .unwrap_or_default();
         let started_flag = state.autoplay_manager_started.clone();
-        tauri::async_runtime::spawn(async move {
+        tokio::spawn(async move {
             if let Err(e) = crate::autoplay::run_autoplay_manager(
                 cfg_for_ap,
                 ctx_for_ap,
@@ -205,29 +189,6 @@ pub async fn update_config(
     Ok(())
 }
 
-/// Flip `overlay.enabled` and apply it, without going through the Settings
-/// page's whole-config save.
-///
-/// The overlay's own close button is the reason this exists: closing the
-/// window has to *stay* closed across restarts, and the overlay webview has no
-/// business round-tripping (and re-persisting) an entire `AppConfig` it never
-/// loaded.
-#[tauri::command]
-pub async fn set_overlay_enabled(
-    enabled: bool,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> CmdResult<()> {
-    let cfg = {
-        let mut cfg = state.config.write().await;
-        cfg.overlay.enabled = enabled;
-        cfg.clone()
-    };
-    persist_config(&cfg, &state.config_path).map_err(|e| e.to_string())?;
-    overlay::reconcile(&app, &cfg.overlay);
-    Ok(())
-}
-
 /// Synthetic `BotInfo` entries for the built-in native bots. They have no
 /// directory, no `pyproject.toml`, and are always "ready" (weights are embedded
 /// in the binary — nothing to install).
@@ -244,7 +205,6 @@ fn native_bot_infos() -> Vec<BotInfo> {
         .collect()
 }
 
-#[tauri::command]
 pub async fn list_bots(state: State<'_, AppState>) -> CmdResult<Vec<BotInfo>> {
     let dir = state.config.read().await.bot.dir.clone();
     let resolved = resolve_dir(Path::new(&dir));
@@ -259,7 +219,6 @@ pub async fn list_bots(state: State<'_, AppState>) -> CmdResult<Vec<BotInfo>> {
 /// Returns an error when the bot does not exist or has no manifest —
 /// frontend should hide the settings panel for manifest-less bots and
 /// avoid calling this command for them.
-#[tauri::command]
 pub async fn get_bot_settings(name: String, state: State<'_, AppState>) -> CmdResult<BotSettings> {
     let dir = state.config.read().await.bot.dir.clone();
     let resolved = resolve_dir(Path::new(&dir));
@@ -283,7 +242,6 @@ pub async fn get_bot_settings(name: String, state: State<'_, AppState>) -> CmdRe
 /// New values take effect on the next bot spawn (i.e. the next
 /// `start_game` event). The currently-running subprocess keeps its old
 /// values; document this caveat in the UI.
-#[tauri::command]
 pub async fn update_bot_settings(
     name: String,
     values: BTreeMap<String, serde_json::Value>,
@@ -318,7 +276,6 @@ pub async fn update_bot_settings(
 /// otherwise the bot's first in-game spawn would run `uv sync`, which can
 /// exceed the react time limit and error. Clearing (empty `name`) is always
 /// allowed.
-#[tauri::command]
 pub async fn set_active_bot(
     mode: String,
     name: String,
@@ -362,7 +319,6 @@ pub async fn set_active_bot(
 /// the user must remove it first via the file browser. The installer
 /// reports progress through `NotifyBus` with sticky id
 /// `bot-install-<name>`.
-#[tauri::command]
 pub async fn install_bot_from_github(
     repo: String,
     asset_glob: Option<String>,
@@ -399,7 +355,6 @@ pub async fn install_bot_from_github(
 /// [`install_bot_from_github`] minus the release download. Refuses to
 /// overwrite an existing `mjai_bot/<name>/`; the source zip is never deleted.
 /// Reports progress through `NotifyBus` with sticky id `bot-install-<name>`.
-#[tauri::command]
 pub async fn install_bot_from_zip(
     zip_path: String,
     name: Option<String>,
@@ -431,7 +386,6 @@ pub async fn install_bot_from_zip(
 
 /// Reinstall a bot from the GitHub source declared in its existing
 /// `manifest.toml`. Removes the current install first.
-#[tauri::command]
 pub async fn update_bot_from_manifest(
     name: String,
     state: State<'_, AppState>,
@@ -485,7 +439,6 @@ pub async fn update_bot_from_manifest(
 /// Reports progress + outcome through `NotifyBus` with sticky id
 /// `bot-sync-<name>`. Refuses to start a second concurrent sync for the
 /// same bot.
-#[tauri::command]
 pub async fn sync_bot_deps(name: String, force: bool, state: State<'_, AppState>) -> CmdResult<()> {
     let dir = state.config.read().await.bot.dir.clone();
     let resolved = resolve_dir(Path::new(&dir));
@@ -495,7 +448,7 @@ pub async fn sync_bot_deps(name: String, force: bool, state: State<'_, AppState>
         .ok_or_else(|| format!("bot {name:?} not found"))?
         .clone();
     let runtime = state.runtime.as_ref().ok_or_else(|| {
-        "Python runtime not available — install python3 and uv on PATH".to_string()
+        "Python runtime not available — install Python 3.12 and uv on PATH".to_string()
     })?;
 
     let _guard = SyncGuard::acquire(&state.syncs_in_flight, &name)
@@ -536,7 +489,6 @@ pub async fn sync_bot_deps(name: String, force: bool, state: State<'_, AppState>
 /// Start the capture backend selected by `cfg.capture.mode`. No-op
 /// (returns Err) when one is already running — call `restart_capture`
 /// instead if you want to swap.
-#[tauri::command]
 pub async fn start_capture(state: State<'_, AppState>) -> CmdResult<()> {
     let already_running = {
         let ctl = state.capture_control.lock().await;
@@ -554,7 +506,6 @@ pub async fn start_capture(state: State<'_, AppState>) -> CmdResult<()> {
 /// Settings "Restart capture" button and by `update_config` whenever a
 /// capture-affecting field changed. Safe to call when nothing is
 /// running (becomes a plain start).
-#[tauri::command]
 pub async fn restart_capture(state: State<'_, AppState>) -> CmdResult<()> {
     restart_capture_inner((*state).clone())
         .await
@@ -563,7 +514,6 @@ pub async fn restart_capture(state: State<'_, AppState>) -> CmdResult<()> {
 
 /// Probe the system for installed Chromium-family browsers. Surface in the
 /// Settings UI so the user can pick which executable to launch.
-#[tauri::command]
 pub async fn detect_system_chrome(
 ) -> CmdResult<Vec<crate::capture::chromium::detect::DetectedBrowser>> {
     Ok(crate::capture::chromium::detect::detect_system_browsers())
@@ -572,7 +522,6 @@ pub async fn detect_system_chrome(
 /// List Chrome-for-Testing versions currently installed under
 /// `<user_config_root>/chrome-for-testing/`. Newest first. Empty when
 /// nothing is installed or the platform isn't supported by CfT.
-#[tauri::command]
 pub async fn list_cft_installed() -> CmdResult<Vec<String>> {
     Ok(crate::capture::chromium::cft::list_installed())
 }
@@ -585,7 +534,6 @@ pub async fn list_cft_installed() -> CmdResult<Vec<String>> {
 ///
 /// Progress is reported through `NotifyBus` with sticky id
 /// `capture-cft-download` so the frontend can show a single live toast.
-#[tauri::command]
 pub async fn download_chrome_for_testing(
     channel: Option<String>,
     state: State<'_, AppState>,
@@ -599,7 +547,6 @@ pub async fn download_chrome_for_testing(
 
 /// Remove an installed Chrome-for-Testing version. No-op when the
 /// version isn't installed.
-#[tauri::command]
 pub async fn remove_chrome_for_testing(
     version: String,
     state: State<'_, AppState>,
@@ -622,7 +569,6 @@ pub async fn remove_chrome_for_testing(
 /// Stop the running capture backend. Kicks in-flight WebSocket flows
 /// (MITM mode) and signals the supervisor to tear down. Returns Err if
 /// nothing is running.
-#[tauri::command]
 pub async fn stop_capture(state: State<'_, AppState>) -> CmdResult<()> {
     let (stop, force_close) = {
         let mut ctl = state.capture_control.lock().await;
@@ -636,9 +582,8 @@ pub async fn stop_capture(state: State<'_, AppState>) -> CmdResult<()> {
     force_close.notify_waiters();
     match stop {
         Some(tx) => {
-            // Receiver dropped means the task already exited — that's fine,
-            // we still cleared `stop` and the status forwarder will catch
-            // up via the next CaptureStatus emission.
+            // A dropped receiver means the task already exited; the next
+            // status event still refreshes the cached state.
             let _ = tx.send(());
             Ok(())
         }
@@ -646,7 +591,6 @@ pub async fn stop_capture(state: State<'_, AppState>) -> CmdResult<()> {
     }
 }
 
-#[tauri::command]
 pub async fn get_status(state: State<'_, AppState>) -> CmdResult<Snapshot> {
     let config = state.config.read().await.clone();
     let bot_status = state.bot_status.read().await.clone();
@@ -662,14 +606,12 @@ pub async fn get_status(state: State<'_, AppState>) -> CmdResult<Snapshot> {
 
 /// One-shot read of the latest [`crate::schema::CaptureStatus`]. Cheaper
 /// than `get_status` when the caller only needs the capture lifecycle.
-#[tauri::command]
 pub async fn get_capture_status(
     state: State<'_, AppState>,
 ) -> CmdResult<crate::schema::CaptureStatus> {
     Ok(state.capture_control.lock().await.status.clone())
 }
 
-#[tauri::command]
 pub async fn get_log_dir(state: State<'_, AppState>) -> CmdResult<PathBuf> {
     Ok(state.log_session.dir().to_path_buf())
 }
@@ -678,7 +620,6 @@ pub async fn get_log_dir(state: State<'_, AppState>) -> CmdResult<PathBuf> {
 /// platform-native opener and returns immediately — we don't wait on the
 /// child, so a missing tool surfaces only if `spawn` itself fails. The
 /// frontend already wraps this in try/catch.
-#[tauri::command]
 pub async fn open_log_folder(session: Option<String>, state: State<'_, AppState>) -> CmdResult<()> {
     let target = match session {
         Some(name) if !name.is_empty() => {
@@ -712,7 +653,7 @@ fn open_path(path: &Path) -> CmdResult<()> {
 
 /// Opens an `http(s)://` URL in the user's default browser. Used by the
 /// first-run wizard's GitHub / Discord links and the purchase flow's PayPal
-/// approve page — Tauri 2's webview won't reliably honour `target="_blank"`
+/// approve page through the operating system's default browser.
 /// without the opener plugin, so we route the click through the OS's native
 /// handler ourselves. Validates the scheme to keep this from being abused as
 /// a generic process spawn.
@@ -721,14 +662,13 @@ fn open_path(path: &Path) -> CmdResult<()> {
 /// macOS, xdg-open on Linux) rather than spawning `explorer <url>`:
 /// explorer.exe silently opens the Documents folder instead of the browser
 /// when the URL carries a query string (e.g. PayPal's `?token=...`).
-#[tauri::command]
 pub async fn open_external_url(url: String) -> CmdResult<()> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err(format!("refused non-http(s) url: {url}"));
     }
     // `opener::open` can block briefly (it may wait on the launcher), so keep
     // it off the async runtime.
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         opener::open(&url).map_err(|e| format!("open url {url}: {e}"))
     })
     .await
@@ -755,7 +695,6 @@ fn is_session_name(name: &str) -> bool {
 /// List every session directory under the active log root. Newest first.
 /// `is_active` marks the session this process is currently writing — the
 /// UI uses it to enable live tail.
-#[tauri::command]
 pub async fn list_log_sessions(state: State<'_, AppState>) -> CmdResult<Vec<LogSessionInfo>> {
     let active_name = state
         .log_session
@@ -829,7 +768,6 @@ pub async fn list_log_sessions(state: State<'_, AppState>) -> CmdResult<Vec<LogS
 /// `skipped_malformed` and skipped, so a partial trailing line in the
 /// active session (still being written) doesn't poison the response.
 /// `limit` is capped at 2000 to bound payload size.
-#[tauri::command]
 pub async fn read_log_session(
     req: ReadLogRequest,
     state: State<'_, AppState>,
@@ -923,7 +861,6 @@ pub async fn read_log_session(
 /// malformed lines bumped under `skipped_malformed`, `limit` capped at
 /// 2000. Filtering is server-side so a session with hundreds of
 /// thousands of events doesn't have to cross the wire to be narrowed.
-#[tauri::command]
 pub async fn read_inspector(
     req: ReadInspectorRequest,
     state: State<'_, AppState>,
@@ -1096,89 +1033,14 @@ fn mjai_event_actor(event: &crate::schema::MjaiEvent) -> Option<u8> {
     }
 }
 
-/// Subscribe to live inspector events. Same shape and lossy semantics as
-/// `subscribe_log_events`. The Logs → Inspector tab uses this for the
-/// active session's live tail.
-#[tauri::command]
-pub async fn subscribe_inspector(
-    state: State<'_, AppState>,
-    on_event: tauri::ipc::Channel<InspectorEntry>,
-) -> CmdResult<()> {
-    let mut rx = state.log_session.subscribe_inspector();
-    tauri::async_runtime::spawn(async move {
-        loop {
-            match rx.recv().await {
-                Ok(entry) => {
-                    let _ = on_event.send(entry);
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    // Inject a synthetic mjai-event-shaped warn marker so
-                    // the UI sees the gap. We piggyback on MjaiEvent::None
-                    // — the inspector tab knows to render dropped-event
-                    // markers when it sees `none` interleaved.
-                    let warn = InspectorEntry::MjaiEvent {
-                        ts_ms: chrono::Local::now().timestamp_millis(),
-                        event: crate::schema::MjaiEvent::None,
-                    };
-                    let _ = on_event.send(warn);
-                    tracing::warn!(
-                        target: "akagi.inspector",
-                        "inspector forwarder dropped {n} entries"
-                    );
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
-            }
-        }
-    });
-    Ok(())
-}
-
-/// Subscribe to live log events. Each event the active session emits is
-/// forwarded over the supplied `tauri::ipc::Channel`. Slow consumers
-/// surface a synthetic `WARN akagi.logger "dropped N events…"` so the
-/// UI can show the gap explicitly. The forwarder task lives until the
-/// broadcast is closed (process shutdown).
-#[tauri::command]
-pub async fn subscribe_log_events(
-    state: State<'_, AppState>,
-    on_event: tauri::ipc::Channel<LogEntry>,
-) -> CmdResult<()> {
-    let mut rx = state.log_session.subscribe();
-    tauri::async_runtime::spawn(async move {
-        loop {
-            match rx.recv().await {
-                Ok(entry) => {
-                    let _ = on_event.send(entry);
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    let warn = LogEntry {
-                        ts_ms: chrono::Local::now().timestamp_millis(),
-                        level: "WARN".into(),
-                        target: "akagi.logger".into(),
-                        file: None,
-                        line: None,
-                        message: format!("dropped {n} log events (consumer too slow)"),
-                        fields: std::collections::HashMap::new(),
-                    };
-                    let _ = on_event.send(warn);
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
-            }
-        }
-    });
-    Ok(())
-}
-
 /// Latest analysis output. `None` until the analysis runner has produced
 /// at least one result for the current game.
-#[tauri::command]
 pub async fn get_analysis(state: State<'_, AppState>) -> CmdResult<Option<AnalysisResult>> {
     Ok(state.analysis_cache.read().await.clone())
 }
 
 /// Live game-state snapshot from the tracker. `None` before any
 /// `start_game` event has been observed.
-#[tauri::command]
 pub async fn get_game_snapshot(state: State<'_, AppState>) -> CmdResult<Option<GameStateSnapshot>> {
     Ok(state.game_tracker.lock().await.snapshot())
 }
@@ -1192,7 +1054,6 @@ pub async fn get_game_snapshot(state: State<'_, AppState>) -> CmdResult<Option<G
 /// Returns `None` when no game is in progress, when the actor's hand isn't
 /// a valid agari shape, or when the winning tile can't be inferred from
 /// the live state (no recent discard for ron / no recent draw for tsumo).
-#[tauri::command]
 pub async fn compute_bot_hora_score(
     actor: u8,
     is_tsumo: bool,
@@ -1208,7 +1069,6 @@ pub async fn compute_bot_hora_score(
 /// Pre-encoded mahgen DSL strings ready for the frontend `<mah-gen>`
 /// element. Built from the same snapshot as `get_game_snapshot` — call
 /// whichever the UI surface prefers; both are O(34 tiles) to generate.
-#[tauri::command]
 pub async fn get_mahgen_view(state: State<'_, AppState>) -> CmdResult<Option<MahgenView>> {
     Ok(state
         .game_tracker
@@ -1222,7 +1082,6 @@ pub async fn get_mahgen_view(state: State<'_, AppState>) -> CmdResult<Option<Mah
 /// the currently-active bot — user must `set_active_bot` to a different
 /// one first. Refuses target paths that escape `bot.dir` (defense in
 /// depth even though `name` came from the bot list, not raw user input).
-#[tauri::command]
 pub async fn delete_bot(name: String, state: State<'_, AppState>) -> CmdResult<()> {
     let (active_4p, active_3p, dir) = {
         let cfg = state.config.read().await;
@@ -1268,7 +1127,6 @@ pub async fn delete_bot(name: String, state: State<'_, AppState>) -> CmdResult<(
 
 /// Filtered, paginated listing of finalised games. Newest-first by
 /// `started_at`. `limit == 0` means use the store's default cap.
-#[tauri::command]
 pub async fn list_game_history(
     filter: Option<HistoryFilter>,
     limit: Option<u32>,
@@ -1286,7 +1144,6 @@ pub async fn list_game_history(
 }
 
 /// Single record by id.
-#[tauri::command]
 pub async fn get_game_history_record(
     id: String,
     state: State<'_, AppState>,
@@ -1299,7 +1156,6 @@ pub async fn get_game_history_record(
 }
 
 /// Full mjai event stream for a recorded game. `None` if the id is unknown.
-#[tauri::command]
 pub async fn get_game_history_events(
     id: String,
     state: State<'_, AppState>,
@@ -1315,7 +1171,6 @@ pub async fn get_game_history_events(
 /// Returns true if a record was actually removed. Emits a
 /// `HistoryEvent::Deleted` on the history bus so the frontend can drop
 /// the row from its cache without a refetch.
-#[tauri::command]
 pub async fn delete_game_history_entry(id: String, state: State<'_, AppState>) -> CmdResult<bool> {
     let store = state.history_store.clone();
     let id_for_blocking = id.clone();
@@ -1339,7 +1194,6 @@ const UPSTREAM_REPO: &str = "shinkuan/Akagi";
 /// button. Returns `Ok(None)` for "already up to date" or unsupported
 /// platforms; `Err(String)` for network / parse failures (the toast in
 /// the frontend surfaces the message verbatim).
-#[tauri::command]
 pub async fn check_for_update(
     state: State<'_, AppState>,
 ) -> CmdResult<Option<crate::updater::UpdateInfo>> {
@@ -1351,26 +1205,14 @@ pub async fn check_for_update(
         .await
         .map_err(|e| format!("check for update: {e:#}"))?;
     // Stash server-side: `apply_update` acts only on what *we* fetched,
-    // never on an UpdateInfo the webview hands back.
+    // never on an UpdateInfo the frontend hands back.
     *state.pending_update.write().await = info.clone();
     Ok(info)
 }
 
-/// Download the release zip found by the last `check_for_update`
-/// (mirror fallback per `[network]` config), verify digest + minisign
-/// signature, swap the binary via `self_replace::self_replace`, then
-/// relaunch. Takes no payload — the pending update is read from
-/// `AppState`, so the webview cannot substitute its own URLs or trust
-/// markers. On success the process exits inside `app.restart()` and
-/// this never returns. The typed error variant lets the frontend
-/// distinguish "fall back to release page" (`read_only_install`,
-/// `unsupported_platform`, `no_matching_asset`, `signature_missing`)
-/// from a real network / integrity error.
-#[tauri::command]
-pub async fn apply_update(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), crate::updater::UpdateError> {
+/// Apply the update cached by `check_for_update` and restart the process.
+/// The request takes no URL or trust metadata; those stay in `AppState`.
+pub async fn apply_update(state: State<'_, AppState>) -> Result<(), crate::updater::UpdateError> {
     let Ok(_guard) = state.updater_lock.try_lock() else {
         return Err(crate::updater::UpdateError::Other {
             message: "another update operation is in progress".into(),
@@ -1383,7 +1225,7 @@ pub async fn apply_update(
         });
     };
     let net = state.config.read().await.network.clone();
-    crate::updater::apply::download_and_apply(&app, &info, &net).await
+    crate::updater::apply::download_and_apply(&info, &net).await
 }
 
 // ---------- Built-in bot cloud inference (native API) ----------
@@ -1394,7 +1236,6 @@ pub async fn apply_update(
 
 /// Redeem a prepaid code (`POST /v3/redeem`, no auth). By default mints a new
 /// key; pass `renew_key` to stack time onto a key you already hold.
-#[tauri::command]
 pub async fn native_api_redeem(
     base_url: String,
     proxy: Option<String>,
@@ -1414,7 +1255,6 @@ pub async fn native_api_redeem(
 }
 
 /// Fetch a key's plan / expiry / live limits (`GET /v3/key`).
-#[tauri::command]
 pub async fn native_api_key_status(
     base_url: String,
     proxy: Option<String>,
@@ -1428,7 +1268,6 @@ pub async fn native_api_key_status(
 }
 
 /// List the models a key's plan may use (`GET /v3/models`).
-#[tauri::command]
 pub async fn native_api_models(
     base_url: String,
     proxy: Option<String>,
@@ -1442,7 +1281,6 @@ pub async fn native_api_models(
 }
 
 /// Liveness + aggregate load (`GET /healthz`, no auth).
-#[tauri::command]
 pub async fn native_api_health(
     base_url: String,
     proxy: Option<String>,
@@ -1457,7 +1295,7 @@ pub async fn native_api_health(
 // Same family as the commands above: server URL / key travel as explicit
 // args from the frontend's config store. The submit is the one exception to
 // "thin passthrough" — it loads the recorded mjai log server-side (Rust) so
-// a whole game never round-trips through the webview, and reuses the native
+// a whole game never round-trips through the frontend, and reuses the native
 // bot's censor/shaping helper so `/v3/review` sees the exact same
 // perspective stream `/v3/react` does.
 
@@ -1469,7 +1307,6 @@ const REVIEW_MAX_EVENTS: usize = 4096;
 /// Submit a recorded history game for whole-game review. `id` is the
 /// history record's ULID; `model` optionally pins the model (empty ⇒ the
 /// server default for the game's player count).
-#[tauri::command]
 pub async fn native_api_review_history_game(
     base_url: String,
     proxy: Option<String>,
@@ -1529,7 +1366,6 @@ pub async fn native_api_review_history_game(
 
 /// Poll a review job (`GET /v3/review/{review_id}`). Meta-only — a `done`
 /// job answers with its share URL, which is where the result body lives.
-#[tauri::command]
 pub async fn native_api_review_status(
     base_url: String,
     proxy: Option<String>,
@@ -1544,7 +1380,6 @@ pub async fn native_api_review_status(
 }
 
 /// (Re-)issue a review's public share link (`POST /v3/review/{id}/share`).
-#[tauri::command]
 pub async fn native_api_review_share(
     base_url: String,
     proxy: Option<String>,
@@ -1559,7 +1394,6 @@ pub async fn native_api_review_share(
 }
 
 /// List this key's live share links (`GET /v3/shares`), newest first.
-#[tauri::command]
 pub async fn native_api_list_shares(
     base_url: String,
     proxy: Option<String>,
@@ -1574,7 +1408,6 @@ pub async fn native_api_list_shares(
 
 /// Revoke a share link (`DELETE /v3/shared/{share_id}`). The review stays
 /// stored; `native_api_review_share` can re-issue a fresh link later.
-#[tauri::command]
 pub async fn native_api_revoke_share(
     base_url: String,
     proxy: Option<String>,
@@ -1603,7 +1436,6 @@ pub async fn native_api_revoke_share(
 /// itself, so the poll and the buyer's email both carry the key. Pass `false`
 /// only to renew an existing key, which needs the raw code for
 /// `/v3/redeem`'s `renew_key`.
-#[tauri::command]
 pub async fn native_api_create_order(
     base_url: String,
     proxy: Option<String>,
@@ -1618,7 +1450,6 @@ pub async fn native_api_create_order(
 /// Poll a one-time purchase (`POST /paypal/order-result`, no auth).
 /// Idempotent; returns `pending` until paid, then `ready` with the API key
 /// (`redeem: true` order) or the redeem code (`redeem: false`).
-#[tauri::command]
 pub async fn native_api_order_result(
     base_url: String,
     proxy: Option<String>,
@@ -1632,7 +1463,6 @@ pub async fn native_api_order_result(
 
 /// Start a subscription (`POST /paypal/create-subscription`, no auth). Not
 /// idempotent — each call opens a fresh PayPal subscription.
-#[tauri::command]
 pub async fn native_api_create_subscription(
     base_url: String,
     proxy: Option<String>,
@@ -1645,7 +1475,6 @@ pub async fn native_api_create_subscription(
 
 /// Poll a subscription (`POST /paypal/subscription-result`, no auth). On
 /// `ready` the response carries the API key directly (no redeem step).
-#[tauri::command]
 pub async fn native_api_subscription_result(
     base_url: String,
     proxy: Option<String>,
@@ -1668,7 +1497,6 @@ pub async fn native_api_subscription_result(
 ///
 /// `redeem` mirrors `native_api_create_order`: one-time products only,
 /// `true` has the poll return the API key directly instead of a redeem code.
-#[tauri::command]
 pub async fn native_api_create_checkout(
     base_url: String,
     proxy: Option<String>,
@@ -1689,7 +1517,6 @@ pub async fn native_api_create_checkout(
 /// payload shape as the PayPal order poll — on `ready` a one-time purchase
 /// carries the code or key per its `redeem` flag, a subscription carries the
 /// key with `days: 0`.
-#[tauri::command]
 pub async fn native_api_checkout_result(
     base_url: String,
     proxy: Option<String>,
@@ -1732,70 +1559,6 @@ fn persist_config(config: &AppConfig, path: &Path) -> std::io::Result<()> {
         }
     };
     std::fs::write(path, body)
-}
-
-/// Pre-builds the handler list for `tauri::generate_handler!`. Keep in
-/// sync when adding commands.
-#[macro_export]
-macro_rules! ipc_handlers {
-    () => {
-        ::tauri::generate_handler![
-            $crate::ipc::commands::get_config,
-            $crate::ipc::commands::update_config,
-            $crate::ipc::commands::set_overlay_enabled,
-            $crate::ipc::commands::list_bots,
-            $crate::ipc::commands::set_active_bot,
-            $crate::ipc::commands::get_bot_settings,
-            $crate::ipc::commands::update_bot_settings,
-            $crate::ipc::commands::install_bot_from_github,
-            $crate::ipc::commands::install_bot_from_zip,
-            $crate::ipc::commands::update_bot_from_manifest,
-            $crate::ipc::commands::sync_bot_deps,
-            $crate::ipc::commands::delete_bot,
-            $crate::ipc::commands::start_capture,
-            $crate::ipc::commands::stop_capture,
-            $crate::ipc::commands::restart_capture,
-            $crate::ipc::commands::get_capture_status,
-            $crate::ipc::commands::detect_system_chrome,
-            $crate::ipc::commands::list_cft_installed,
-            $crate::ipc::commands::download_chrome_for_testing,
-            $crate::ipc::commands::remove_chrome_for_testing,
-            $crate::ipc::commands::get_status,
-            $crate::ipc::commands::get_log_dir,
-            $crate::ipc::commands::open_log_folder,
-            $crate::ipc::commands::open_external_url,
-            $crate::ipc::commands::list_log_sessions,
-            $crate::ipc::commands::read_log_session,
-            $crate::ipc::commands::subscribe_log_events,
-            $crate::ipc::commands::read_inspector,
-            $crate::ipc::commands::subscribe_inspector,
-            $crate::ipc::commands::get_analysis,
-            $crate::ipc::commands::get_game_snapshot,
-            $crate::ipc::commands::get_mahgen_view,
-            $crate::ipc::commands::compute_bot_hora_score,
-            $crate::ipc::commands::list_game_history,
-            $crate::ipc::commands::get_game_history_record,
-            $crate::ipc::commands::get_game_history_events,
-            $crate::ipc::commands::delete_game_history_entry,
-            $crate::ipc::commands::check_for_update,
-            $crate::ipc::commands::apply_update,
-            $crate::ipc::commands::native_api_redeem,
-            $crate::ipc::commands::native_api_key_status,
-            $crate::ipc::commands::native_api_models,
-            $crate::ipc::commands::native_api_health,
-            $crate::ipc::commands::native_api_review_history_game,
-            $crate::ipc::commands::native_api_review_status,
-            $crate::ipc::commands::native_api_review_share,
-            $crate::ipc::commands::native_api_list_shares,
-            $crate::ipc::commands::native_api_revoke_share,
-            $crate::ipc::commands::native_api_create_order,
-            $crate::ipc::commands::native_api_order_result,
-            $crate::ipc::commands::native_api_create_subscription,
-            $crate::ipc::commands::native_api_subscription_result,
-            $crate::ipc::commands::native_api_create_checkout,
-            $crate::ipc::commands::native_api_checkout_result,
-        ]
-    };
 }
 
 #[cfg(test)]

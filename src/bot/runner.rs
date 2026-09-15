@@ -99,7 +99,7 @@ impl SubprocessBot {
         notify_tx: NotifyBus,
     ) -> Result<Self> {
         runtime.ensure_synced(bot_dir).await?;
-        let mut cmd = runtime.command_for(bot_dir, &["bot.py"]);
+        let mut cmd = runtime.command_for(bot_dir, &["bot.py"])?;
         cmd.arg(actor_id.to_string());
         Self::spawn_with_command(cmd, runtime.clone(), bot_dir, actor_id, notify_tx).await
     }
@@ -243,7 +243,7 @@ fn spawn_stderr_pump(stderr: ChildStderr, bot_name: String, notify_tx: NotifyBus
             match lines.next_line().await {
                 Ok(Some(line)) => match parse_notify_line(&line) {
                     Ok(Some(n)) => {
-                        // Best-effort: a closed bus (no IPC subscribers yet)
+                        // Best-effort: a closed bus (no subscribers yet)
                         // is fine — same fire-and-forget contract as every
                         // other NotifyBus producer.
                         let _ = notify_tx.send(n);

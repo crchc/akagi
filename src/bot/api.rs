@@ -10,9 +10,7 @@
 //! Two consumers:
 //! - the built-in bot ([`crate::bot::native::NativeBot`]) calls
 //!   [`ApiClient::react`] at each decision point, while cloud inference is on;
-//! - the IPC layer ([`crate::ipc::commands`]) calls [`redeem`],
-//!   [`ApiClient::key_status`], [`ApiClient::models`] and [`health`] so the
-//!   frontend can redeem codes and inspect a key.
+//! - Web API handlers use the account-management methods.
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};

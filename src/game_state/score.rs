@@ -1,7 +1,6 @@
 //! Thin wrappers over `riichienv_core::score` and `HandEvaluator`.
 //!
-//! The intent is to give the rest of Akagi (and eventually IPC commands)
-//! a stable surface that doesn't leak the upstream crate's exact types.
+//! Provides a stable surface without leaking the upstream crate's exact types.
 //! When riichienv tweaks its API in a future bump, this is the only
 //! file that has to change.
 

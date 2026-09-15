@@ -3,7 +3,9 @@ use std::{env, path::PathBuf};
 fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
 
+    let protoc = protoc_bin_vendored::protoc_bin_path().expect("vendored protoc");
     prost_build::Config::new()
+        .protoc_executable(protoc)
         .type_attribute(".", "#[allow(dead_code)]")
         .file_descriptor_set_path(out_dir.join("liqi_desc.bin"))
         .compile_protos(
@@ -15,12 +17,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/bridge/majsoul/proto/liqi.proto");
     println!("cargo:rerun-if-changed=build.rs");
 
-    // Surface the build target triple to runtime code so it can pick the
-    // right bundled python-build-standalone / uv binary out of the Tauri
-    // resource dir. Cargo only exposes this via the `TARGET` env var at
-    // build time; we forward it as `TARGET_TRIPLE` for the binary.
+    // Used to locate the matching bundled Python and uv binaries at runtime.
     let target = env::var("TARGET").expect("TARGET not set by cargo");
     println!("cargo:rustc-env=TARGET_TRIPLE={target}");
-
-    tauri_build::build();
 }

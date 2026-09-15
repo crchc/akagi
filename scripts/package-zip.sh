@@ -6,6 +6,7 @@
 #   dist/akagi-<version>-<os>-<arch>.zip
 #     akagi-<version>-<os>-<arch>/
 #       akagi[.exe]
+#       frontend/index.html + assets/...
 #       runtime/python/<triple>/...
 #       runtime/uv/<triple>/...
 #       LICENSE.txt
@@ -17,7 +18,7 @@
 #
 # Prerequisites:
 #   1. Binary built into target/<triple>/release/akagi[.exe]
-#      (e.g. via `cargo tauri build --no-bundle --target <triple>`)
+#      (e.g. via `cargo build --release --target <triple>`)
 #   2. Runtime fetched into runtime/{python,uv}/<triple>/
 #      (e.g. via `scripts/fetch-runtime.sh <triple>`)
 #
@@ -56,16 +57,21 @@ PY_SRC="$ROOT/runtime/python/$TARGET"
 UV_SRC="$ROOT/runtime/uv/$TARGET"
 
 if [[ ! -f "$BIN_SRC" ]]; then
-  echo "binary not found at $BIN_SRC — run cargo build / tauri build first" >&2
+  echo "binary not found at $BIN_SRC — run cargo build first" >&2
   exit 1
 fi
 if [[ ! -d "$PY_SRC" ]] || [[ ! -d "$UV_SRC" ]]; then
   echo "runtime tree missing — run scripts/fetch-runtime.sh $TARGET first" >&2
   exit 1
 fi
+if [[ ! -f "$ROOT/frontend/dist/index.html" ]]; then
+  echo "frontend not built — run npm run --prefix frontend build first" >&2
+  exit 1
+fi
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/runtime/python" "$STAGE/runtime/uv"
+mkdir -p "$STAGE/frontend"
 
 cp "$BIN_SRC" "$STAGE/$EXE"
 if [[ "$OS" != "windows" ]]; then
@@ -80,6 +86,7 @@ cp -RP "$UV_SRC" "$STAGE/runtime/uv/$TARGET"
 
 cp "$ROOT/LICENSE.txt" "$STAGE/LICENSE.txt"
 cp "$ROOT/NOTICE"      "$STAGE/NOTICE"
+cp -R "$ROOT/frontend/dist/." "$STAGE/frontend/"
 
 cat > "$STAGE/README.txt" <<EOF
 Akagi $VERSION — portable build ($OS-$ARCH)
@@ -90,7 +97,9 @@ Quick start
 2. Run the binary:
      Linux/macOS:  ./akagi
      Windows:      akagi.exe
-3. On first launch, Akagi creates these directories alongside the binary:
+3. Akagi opens http://127.0.0.1:3000 in your default browser. Keep the
+   terminal window running while using the Web UI.
+4. On first launch, Akagi creates these directories alongside the binary:
      config.toml   logs/   history/   ca/   mjai_bot/
 
 Platform notes
@@ -100,9 +109,6 @@ EOF
 case "$OS" in
   windows)
     cat >> "$STAGE/README.txt" <<'EOF'
-- WebView2 runtime is required. Windows 10 1803+ and Windows 11 ship it
-  by default; older systems can install it from
-  https://developer.microsoft.com/microsoft-edge/webview2/
 - The binary is unsigned, so SmartScreen will warn on first launch.
   Click "More info" then "Run anyway".
 EOF
@@ -119,10 +125,6 @@ EOF
   linux)
     cat >> "$STAGE/README.txt" <<'EOF'
 - Built on ubuntu-22.04, requires glibc 2.35 or newer.
-- Requires WebKit2GTK 4.1:
-    Debian/Ubuntu:  apt install libwebkit2gtk-4.1-0
-    Fedora:         dnf install webkit2gtk4.1
-    Arch:           pacman -S webkit2gtk-4.1
 EOF
     ;;
 esac

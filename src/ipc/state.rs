@@ -1,19 +1,7 @@
-//! Shared state held by Tauri as `tauri::State<AppState>`.
+//! State shared by the Web API and background workers.
 //!
-//! `AppState` owns the long-lived handles every IPC command and forwarder
-//! needs: a clone of each `event_bus` `Sender`, the live `AppConfig`, the
-//! log session directory, and the runtime handle that lets commands
-//! start / stop the capture backend on demand.
-//!
-//! Snapshots vs streams: the `*_bus` channels are the canonical event
-//! stream, but a frontend that opens a window mid-game needs a one-shot
-//! "what's the current state?" answer. To serve that, the IPC forwarder
-//! task mirrors every status event into the `bot_status` /
-//! `capture_control.status` slots, and the `get_status` command reads
-//! them back. Commands that *change* state (set_active_bot,
-//! start/stop_capture) also write the snapshot synchronously so a
-//! follow-up `get_status` is always consistent with the action that just
-//! succeeded.
+//! Status events are also cached so a newly opened page can obtain the latest
+//! state through `get_status` before subscribing to SSE.
 
 use crate::analysis::runner::AnalysisCache;
 use crate::autoplay::AutoplayContext;
@@ -78,17 +66,17 @@ pub struct AppState {
     pub analysis_bus: AnalysisBus,
     pub history_bus: HistoryBus,
 
-    /// Latest BotStatus seen on the bus. Forwarder writes; commands read.
+    /// Latest bot status, cached for `get_status`.
     pub bot_status: Arc<RwLock<BotStatus>>,
     pub capture_control: Arc<Mutex<CaptureControl>>,
-    /// Live game-state mirror. Future IPC commands lock this and call
+    /// Live game-state mirror. API operations lock this and call
     /// `snapshot()` to expose hands/scores/dora to the frontend.
     pub game_tracker: Arc<Mutex<GameTracker>>,
     /// Latest analysis result, populated by the analysis runner. Read by
-    /// the `get_analysis` Tauri command for one-shot queries.
+    /// the `get_analysis` Web API operation for one-shot queries.
     pub analysis_cache: AnalysisCache,
     /// Persistent game-history store. Written by the recorder task,
-    /// read by `list_game_history` / `get_game_history_*` IPC commands.
+    /// read by the game-history API operations.
     pub history_store: Arc<HistoryStore>,
     /// Shared cell holding the platform tag the history recorder stamps
     /// onto each finalised game. `update_config` updates this when the
@@ -126,7 +114,7 @@ pub struct AppState {
     /// can't race two HTTP fetches or — worse — two binary swaps.
     pub updater_lock: Arc<Mutex<()>>,
     /// Result of the last successful `check_for_update`, and the ONLY
-    /// input `apply_update` acts on. The webview never round-trips an
+    /// input `apply_update` acts on. The frontend never round-trips an
     /// `UpdateInfo` back to us — fields like `asset_url` and
     /// `meta_source` are security policy inputs, and a compromised
     /// frontend must not get to assert them.

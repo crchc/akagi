@@ -2,7 +2,7 @@
 //!
 //! `uv sync` against an in-flight sync's venv is undefined: lockfile
 //! contention, half-written `pyvenv.cfg`, partially-extracted wheels.
-//! The IPC `sync_bot_deps` command (user-triggered Reinstall environment)
+//! The `sync_bot_deps` operation (user-triggered Reinstall environment)
 //! and `BotManager::spawn_runner` (game-start sync) can both fire at the
 //! same time, so they share an `Arc<Mutex<HashSet<String>>>` and use this
 //! guard to acquire-or-bail on the bot name.

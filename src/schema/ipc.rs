@@ -1,18 +1,4 @@
-//! Backend ↔ frontend IPC payload types.
-//!
-//! These types travel two directions:
-//!
-//! - **Backend → frontend**: emitted as Tauri events by `crate::ipc`. Names
-//!   match the Tauri event names (kebab-case): `notify`, `bot-status`,
-//!   `proxy-status`.
-//! - **Frontend → backend**: returned from `#[tauri::command]` handlers in
-//!   `crate::ipc::commands`.
-//!
-//! All types are `Serialize + Deserialize` so they round-trip through Tauri's
-//! JSON bridge and through the in-process broadcast buses in
-//! `crate::event_bus`. Variants are tagged so the wire shape stays stable
-//! when new states are added — frontends can match on `state` / `level` /
-//! `stage` without positional surprises.
+//! JSON payloads shared by Web API responses, SSE events, and event buses.
 
 use serde::{Deserialize, Serialize};
 
@@ -28,9 +14,7 @@ pub enum NotifyLevel {
     Error,
 }
 
-/// One frontend-facing notification. Any subsystem may push these onto
-/// `event_bus::NotifyBus`; `crate::ipc` forwards them to all webviews as
-/// the `notify` event.
+/// One frontend notification sent through `NotifyBus` and SSE.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Notification {
     pub level: NotifyLevel,
@@ -125,7 +109,7 @@ pub enum BotStatus {
 // ---------- CaptureStatus ----------
 
 /// Discriminant of the active capture transport. Mirrors
-/// [`crate::capture::CaptureKind`] for IPC payloads — re-exported here so
+/// [`crate::capture::CaptureKind`] for API payloads — re-exported here so
 /// `schema::*` is a self-contained surface for frontend type generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -190,7 +174,7 @@ use crate::config::AppConfig;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// One discovered bot, IPC-shaped (separate from `bot::BotEntry` so the
+/// One discovered bot, API-shaped (separate from `bot::BotEntry` so the
 /// wire contract can evolve independently of the registry internals).
 ///
 /// `manifest` carries the bot's settings schema (rendered as a form on
@@ -233,11 +217,7 @@ pub struct Snapshot {
 
 // ---------- Logs ----------
 //
-// One canonical shape for an emitted tracing event: written to disk as a
-// line of `all.jsonl` AND broadcast to the frontend log viewer over a
-// `tauri::ipc::Channel`. Keeping disk and wire shapes identical means the
-// initial-load reader and the live-tail subscriber feed the same UI rows
-// without a translation step.
+// Shared by `all.jsonl` and the live SSE log stream.
 
 /// One log event. `ts_ms` is millisecond Unix time (local clock at emit).
 /// `fields` carries the structured fields recorded via `tracing` (the

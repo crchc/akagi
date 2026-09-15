@@ -28,8 +28,8 @@ const record = (id: string, numPlayers = 4) =>
 // a fresh copy.
 async function freshStore(invoke: ReturnType<typeof vi.fn>) {
   vi.resetModules()
-  vi.doMock('@/lib/tauri', () => ({
-    HAS_TAURI: true,
+  vi.doMock('@/lib/api', () => ({
+    HAS_BACKEND: true,
     invoke,
     listen: async () => () => {},
   }))

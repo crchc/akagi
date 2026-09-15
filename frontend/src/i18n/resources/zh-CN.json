@@ -482,14 +482,7 @@
       "min_delay_hint": "所有动作的安全下限：雀魂需要时间渲染画面，过早点击会被吃掉。两种模式均适用，脚本无法低于此值。",
       "min_button_delay": "按钮最小延迟（ms）",
       "min_button_delay_hint": "吃/碰/杠/和/跳过/立直等按钮的更高下限——按钮要等打牌动画结束加上自身弹出动画才会出现，比手牌渲染更晚。若仍出现按钮没点到的情况请调高此值。"
-    },
-    "overlay": "建议悬浮窗",
-    "overlay_enabled": "显示悬浮窗",
-    "overlay_enabled_hint": "一个始终置顶的小窗口，浮在游戏画面上显示 AI 的建议打牌。可以拖动到任意位置，也可以从边缘调整大小。",
-    "overlay_top_n": "显示几个建议",
-    "overlay_opacity": "不透明度",
-    "overlay_always_on_top": "保持在其他窗口之上",
-    "overlay_always_on_top_hint": "如果想把悬浮窗放到第二个显示器，可以关掉这个选项。另请注意：游戏若使用“独占全屏”，会盖住所有置顶窗口，请改用无边框或窗口模式。"
+    }
   },
   "setup": {
     "title": "Akagi 设置",
@@ -593,12 +586,13 @@
     "install_repo_hint_post": ")。",
     "install_glob": "Asset glob(选填)",
     "install_local_name": "本机名称(选填，默认为 repo 名)",
+    "install_zip_name": "Bot 名称（选填，默认为文件名）",
     "install_zip_btn": "从 ZIP 安装",
     "install_zip_title": "从本地 ZIP 文件安装 Bot",
     "install_zip_path": "ZIP 文件",
     "install_zip_path_placeholder": "/path/to/bot.zip",
     "install_zip_browse": "浏览…",
-    "install_zip_path_hint": "选择本地 .zip 文件，或粘贴其完整路径。",
+    "install_zip_path_hint": "选择本地 .zip 文件。",
     "drawer_loading": "加载中…",
     "drawer_reinstall": "重建环境",
     "drawer_reinstall_tooltip": "清除并重建这个 Bot 的 Python 虚拟环境",
@@ -750,11 +744,7 @@
       "reset_hint": "改变主意了？随时可用“重置布局”还原为默认排列。",
       "got_it": "我知道了",
       "help_aria": "显示面板操作提示"
-    },
-    "overlay": "悬浮窗",
-    "overlay_show": "显示建议悬浮窗",
-    "overlay_hide": "隐藏建议悬浮窗",
-    "overlay_toggle_failed": "无法切换悬浮窗"
+    }
   },
   "mahjong": {
     "riichi": "立直",
@@ -914,9 +904,5 @@
   "install_overlay": {
     "title": "安装中…",
     "warning": "安装完成前，请勿关闭程序或前往对局。"
-  },
-  "overlay": {
-    "close": "关闭悬浮窗",
-    "empty": "等待 AI 建议…"
   }
 }

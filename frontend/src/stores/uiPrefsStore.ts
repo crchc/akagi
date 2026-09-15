@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-// Frontend-only UI preferences kept out of the Tauri-owned `AppConfig` since
+// Frontend-only UI preferences kept out of the backend-owned `AppConfig` since
 // they don't affect any backend behavior. Sidebar collapsed/hover state lives
 // in `useSidebar` (own zustand+persist store ported from shadcn-ui-sidebar).
 const SCALE_KEY = 'akagi.ui.scale'

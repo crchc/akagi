@@ -89,4 +89,4 @@ each line a serialized `MjaiEvent`.
 
 ## Lifetime
 
-`Session` owns the `tracing-appender` `WorkerGuard`s. Drop it only at app shutdown — dropping flushes + closes the file appenders. `lib.rs` keeps the `Arc<Session>` alive for the full Tauri runtime.
+`Session` owns the `tracing-appender` `WorkerGuard`s. Drop it only at app shutdown — dropping flushes + closes the file appenders. `lib.rs` keeps the `Arc<Session>` alive for the full server runtime.

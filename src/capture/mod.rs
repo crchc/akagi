@@ -26,7 +26,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Notify;
 
-/// Discriminant exposed in [`CaptureStatus`] / IPC payloads.
+/// Discriminant exposed in [`CaptureStatus`] API payloads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CaptureKind {

@@ -72,7 +72,6 @@ function makeConfig(over: {
         no_budget_cap_ms: 0,
       },
     },
-    overlay: { enabled: true, top_n: 3, opacity: 1, always_on_top: true },
     network: { github_mirror_mode: 'auto', github_custom_mirror: '' },
   }
 }

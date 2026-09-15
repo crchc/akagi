@@ -25,7 +25,7 @@ Anything fetched through a mirror is attacker-supplied until verified:
   metadata — so forged metadata pairing a fake newer tag with a genuine
   signed older zip fails verification. `apply_update` also only acts on
   the `UpdateInfo` stashed server-side by the last check
-  (`AppState::pending_update`); the webview never hands one back.
+  (`AppState::pending_update`); the frontend never hands one back.
 - **Bot installs** (`bot::install`): verified when the release ships a
   `.minisig`; otherwise installable with a warning notification when a
   mirror was involved (bots are third-party by design — the user picked

@@ -3,9 +3,8 @@
 //!
 //! Triggered after every `MjaiEvent` the tracker has digested. Re-runs
 //! the full analysis whether the event affected our hand or not — the
-//! per-event cost (~200 µs in release for a 13-tile state, up to ~1 ms
-//! for a 14-tile discard search) is comfortably below the IPC latency
-//! budget. See `tests/analysis_bench.rs` for the figures.
+//! per-event cost is small enough to recompute eagerly. See
+//! `tests/analysis_bench.rs` for measurements.
 
 use std::sync::Arc;
 
@@ -17,9 +16,7 @@ use super::snapshot_adapter::to_player_info;
 use crate::event_bus::{AnalysisBus, TrackedEvent};
 use crate::game_state::tracker::GameTracker;
 
-/// Cache of the latest analysis output. The IPC `get_analysis` command reads
-/// this for one-shot queries; new tabs / panes opened mid-game can pull the
-/// freshest snapshot without waiting for the next `analysis-result` event.
+/// Latest analysis, available to `get_analysis` between SSE events.
 pub type AnalysisCache = Arc<RwLock<Option<AnalysisResult>>>;
 
 /// Spawn the analysis runner task. Must be called from within a Tokio

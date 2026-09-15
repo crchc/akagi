@@ -181,7 +181,7 @@ export function BotActionTile({ bp }: { bp: Breakpoint }) {
   const rowRef = useRef<HTMLDivElement>(null)
 
   // Score lookup is keyed on the response's monotonic _seq so each new hora
-  // triggers exactly one IPC round-trip. Hook is always called (rules of
+  // triggers exactly one API request. Hook is always called (rules of
   // hooks) but stays inert when the latest response isn't hora.
   const isHora = latest?.type === 'hora'
   const score = useBotHoraScore(
@@ -201,7 +201,7 @@ export function BotActionTile({ bp }: { bp: Breakpoint }) {
       extra = t('mahjong.points_value', { points: score.points.toLocaleString() })
       mahgen = mjaiToMahgen([score.win_tile])
     } else {
-      // While the IPC is in flight or returned None, leave info blank so
+      // While the request is in flight or returned None, leave info blank so
       // the tile stays clean.
       extra = ''
       mahgen = ''

@@ -15,7 +15,7 @@ describe('pickShow', () => {
   it('rejects metas with nothing to render', () => {
     // A bare `none` reaction, a bot that emits no `show`, and a `show` with an
     // empty list all have to be indistinguishable from "no suggestion" —
-    // otherwise the overlay would blank out its last real suggestion.
+    // otherwise the UI would blank out its last real suggestion.
     expect(pickShow(undefined)).toBeNull()
     expect(pickShow(null)).toBeNull()
     expect(pickShow({})).toBeNull()
@@ -47,7 +47,7 @@ describe('visibleItems', () => {
   })
 
   it('applies the top-N cap after filtering, not before', () => {
-    // The overlay's "top 3" must mean three *visible* rows. Slicing first
+    // "Top 3" must mean three *visible* rows. Slicing first
     // would have spent one of the three slots on the empty candidate and
     // rendered only two.
     expect(visibleItems(show, 3).map((i) => i.label)).toEqual([

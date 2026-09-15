@@ -1,7 +1,7 @@
 # Schema Module
 
 Shared types used across the project. Anything that crosses module boundaries
-— protocol events, backend↔frontend IPC payloads, persisted records — lives
+— protocol events, backend↔frontend API payloads, persisted records — lives
 here so it isn't owned by a single subsystem.
 
 ## Existing schemas
@@ -23,9 +23,7 @@ here so it isn't owned by a single subsystem.
    types. Derive `Serialize`/`Deserialize` so the type is usable on both
    sides of any boundary it might cross.
 2. Register the module in `src/schema/mod.rs` and re-export the main type.
-3. If the schema is consumed by `tauri` IPC commands, also derive
-   `tauri::specta::Type` (or whatever binding generator is in use) so the
-   frontend gets a typed definition.
+3. If the Web API uses the schema, add the corresponding TypeScript type.
 
 ## Conventions
 

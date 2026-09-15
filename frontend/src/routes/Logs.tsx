@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { invoke } from '@/lib/tauri'
+import { invoke } from '@/lib/api'
 import { useLogsStore } from '@/stores/logsStore'
 import { useInspectorStore } from '@/stores/inspectorStore'
 import type {

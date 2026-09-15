@@ -35,7 +35,7 @@ scripts/package-zip.sh x86_64-unknown-linux-gnu
 Prerequisites:
 
 - The binary exists at `target/<triple>/release/akagi[.exe]`. Produce it
-  with `cargo tauri build --no-bundle --target <triple>` (or plain
+  with `cargo build --release --target <triple>` (or plain
   `cargo build --release --target <triple>` if you already ran the
   frontend build separately).
 - `runtime/python/<triple>/` and `runtime/uv/<triple>/` are populated by
@@ -44,8 +44,8 @@ Prerequisites:
 Outputs a single zip named `akagi-<version>-<os>-<arch>.zip` containing
 a top-level folder of the same name with the binary, `runtime/`,
 `LICENSE.txt`, `NOTICE`, and a generated `README.txt` with
-platform-specific quick-start notes (Gatekeeper xattr on macOS,
-SmartScreen on Windows, WebKit2GTK package names on Linux).
+platform-specific quick-start notes (Gatekeeper xattr on macOS and
+SmartScreen on Windows).
 
 The version is parsed from the first `version = "..."` line of
 `Cargo.toml` (the `[package]` table is the first table, so this is
@@ -81,6 +81,6 @@ python scripts/extract_liqi.py --from-raw <dir-with-lua-and-proto_config>
 ## CI integration
 
 `.github/workflows/release.yml` ties `fetch-runtime.sh` and
-`package-zip.sh` together: fetch → `cargo tauri build --no-bundle` →
+`package-zip.sh` together: fetch → `cargo build --release` →
 package → upload `dist/*.zip`. One zip per target (linux-x64,
 macos-arm64, windows-x64).

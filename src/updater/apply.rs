@@ -1,6 +1,5 @@
 //! Download a release zip (direct or via mirrors), verify integrity,
-//! extract just the binary, atomically swap it into place via
-//! `self_replace`, then trigger a restart.
+//! extract the binary and Web UI, replace them in place, then restart.
 //!
 //! Integrity policy: the SHA-256 digest from release metadata is checked
 //! when present, but the *trust anchor* is the minisign signature —
@@ -9,10 +8,8 @@
 //! valid signature is mandatory; a fully-direct download of an old
 //! unsigned release keeps the historical digest-only behaviour.
 //!
-//! Only the running platform's binary is extracted — the bundled
-//! Python+UV runtime tree stays untouched. That's fine for normal patch
-//! releases (which only change Rust code); the user is reminded in the
-//! UI that runtime-bump releases may require a full reinstall.
+//! The bundled Python+UV runtime tree stays untouched. That's fine for
+//! normal patch releases; runtime-bump releases may require a full reinstall.
 
 use crate::config::NetworkConfig;
 use crate::github::mirror::{self, Source};
@@ -23,18 +20,10 @@ use crate::updater::check::UpdateInfo;
 use crate::updater::error::UpdateError;
 use anyhow::{anyhow, Context, Result};
 use std::path::{Path, PathBuf};
-use tauri::AppHandle;
 use tracing::{info as log_info, warn};
 
-/// Top-level entry point called by the `apply_update` IPC command.
-/// On success the function does NOT return — `app.restart()` exits the
-/// process. Failures map to `UpdateError` so the frontend can decide
-/// between a generic toast and a "fall back to release page" hint.
-pub async fn download_and_apply(
-    app: &AppHandle,
-    info: &UpdateInfo,
-    net: &NetworkConfig,
-) -> Result<(), UpdateError> {
+/// Download and apply an update. On success, starts the new binary and exits.
+pub async fn download_and_apply(info: &UpdateInfo, net: &NetworkConfig) -> Result<(), UpdateError> {
     // Determine the running exe path and verify its parent is writable
     // before we burn bandwidth on a download we can't apply.
     let current_exe = std::env::current_exe()
@@ -117,12 +106,7 @@ pub async fn download_and_apply(
         }
     }
 
-    // Extract the whole zip into a sibling dir, then locate the binary
-    // entry. The release zip wraps everything in a single
-    // `akagi-<version>-<triple>/` directory, so the binary lives one
-    // level down. We don't extract the runtime tree — too large and the
-    // user is told to manually reinstall when the runtime version
-    // changes.
+    // The release zip has one wrapping directory around the binary and Web UI.
     let extract_dir = tempdir.path().join("extracted");
     std::fs::create_dir(&extract_dir)
         .with_context(|| format!("mkdir {}", extract_dir.display()))
@@ -137,6 +121,11 @@ pub async fn download_and_apply(
         .map_err(UpdateError::from)?
         .to_owned();
     let new_binary = find_binary(&extract_dir, &binary_name).ok_or(UpdateError::NoMatchingAsset)?;
+    let new_frontend = new_binary
+        .parent()
+        .map(|parent| parent.join("frontend"))
+        .filter(|path| path.join("index.html").is_file())
+        .ok_or(UpdateError::NoMatchingAsset)?;
 
     #[cfg(unix)]
     {
@@ -144,7 +133,13 @@ pub async fn download_and_apply(
         let _ = std::fs::set_permissions(&new_binary, std::fs::Permissions::from_mode(0o755));
     }
 
-    // Atomic in-place swap. On Unix this is a `rename` over the
+    // Copy hashed assets first and index.html last, so the browser never sees
+    // an entry point that refers to files which have not arrived yet.
+    copy_frontend(&new_frontend, &install_dir.join("frontend"))
+        .context("replace Web UI assets")
+        .map_err(UpdateError::from)?;
+
+    // Atomic in-place binary swap. On Unix this is a `rename` over the
     // currently-running ELF/Mach-O (the kernel keeps the running inode
     // alive). On Windows it's the documented copy + delete-on-close
     // dance — see the self_replace crate docs for the gory details.
@@ -152,10 +147,45 @@ pub async fn download_and_apply(
         .context("self_replace::self_replace")
         .map_err(UpdateError::from)?;
 
-    // Trigger restart. The call shuts the process down and re-execs the
-    // (now swapped) binary, so anything after this point in the source
-    // is unreachable.
-    app.restart();
+    let exe = std::env::current_exe()
+        .context("resolve updated executable")
+        .map_err(UpdateError::from)?;
+    std::process::Command::new(exe)
+        .spawn()
+        .context("restart updated executable")
+        .map_err(UpdateError::from)?;
+    std::process::exit(0);
+}
+
+fn copy_frontend(source: &Path, destination: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(destination)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = destination.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_tree(&from, &to)?;
+        } else if entry.file_name() != "index.html" {
+            std::fs::copy(from, to)?;
+        }
+    }
+    std::fs::copy(source.join("index.html"), destination.join("index.html"))?;
+    Ok(())
+}
+
+fn copy_tree(source: &Path, destination: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(destination)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = destination.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_tree(&from, &to)?;
+        } else {
+            std::fs::copy(from, to)?;
+        }
+    }
+    Ok(())
 }
 
 /// Returns true if `dir` looks writable. We do an explicit write-probe
@@ -249,6 +279,27 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join("akagi-3.0.12-linux-x64")).unwrap();
         std::fs::write(tmp.path().join("akagi-3.0.12-linux-x64/README.txt"), b"hi").unwrap();
         assert!(find_binary(tmp.path(), std::ffi::OsStr::new("akagi")).is_none());
+    }
+
+    #[test]
+    fn copy_frontend_handles_nested_assets() {
+        let source = TempDir::new().unwrap();
+        let destination = TempDir::new().unwrap();
+        std::fs::create_dir(source.path().join("assets")).unwrap();
+        std::fs::write(source.path().join("index.html"), b"new index").unwrap();
+        std::fs::write(source.path().join("assets/app.js"), b"new js").unwrap();
+        std::fs::write(destination.path().join("index.html"), b"old index").unwrap();
+
+        copy_frontend(source.path(), destination.path()).unwrap();
+
+        assert_eq!(
+            std::fs::read(destination.path().join("index.html")).unwrap(),
+            b"new index"
+        );
+        assert_eq!(
+            std::fs::read(destination.path().join("assets/app.js")).unwrap(),
+            b"new js"
+        );
     }
 
     #[test]

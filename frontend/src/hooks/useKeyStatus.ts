@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { invoke } from '@/lib/tauri'
+import { invoke } from '@/lib/api'
 import type { KeyStatus } from '@/types'
 
 /**

@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { checkApiBeforeSave } from './nativeApi'
 import type { NativeApiConfig } from '@/types'
 
-// The helper reaches the backend through `@/lib/tauri`'s `invoke`; mock it so
+// The helper reaches the backend through `@/lib/api`'s `invoke`; mock it so
 // the test controls whether the key-status endpoint accepts or rejects the key.
 const invoke = vi.fn()
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/api', () => ({
   invoke: (cmd: string, args?: Record<string, unknown>) => invoke(cmd, args),
 }))
 

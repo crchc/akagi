@@ -1,10 +1,5 @@
 import type { ShowItem, ShowMeta } from '@/types'
 
-// Pure helpers for the bot's `meta.show` payload. Used by the Bot Show
-// dashboard tile and by the always-on-top overlay window, which get their data
-// from different places (a zustand store vs. a raw `bot-response` listener) and
-// only agree on shape.
-
 /** "#aabbcc" → "rgba(170,187,204,a)". Undefined when the input isn't a valid hex. */
 export function hexToRgba(hex: string | null | undefined, alpha: number): string | undefined {
   if (!hex) return undefined
@@ -32,9 +27,8 @@ export function hasContent(it: ShowItem): boolean {
 /**
  * Drawable rows of `show`, capped at `limit`.
  *
- * `limit` is the overlay's top-N. It is applied *after* the empty-row filter
- * so "top 3" always means three visible rows, not three candidates of which
- * some may render as nothing.
+ * A limit is applied after the empty-row filter, so it always counts visible
+ * rows rather than empty candidates.
  */
 export function visibleItems(show: ShowMeta | null, limit?: number): ShowItem[] {
   const items = show?.items.filter(hasContent) ?? []

@@ -482,14 +482,7 @@
       "min_delay_hint": "Safety floor for every action: Mahjong Soul needs time to render the UI, and a click issued too early is silently lost. Applies in both modes and cannot be undercut by the script.",
       "min_button_delay": "Minimum button delay (ms)",
       "min_button_delay_hint": "Higher floor for chi/pon/kan/ron/skip/riichi buttons — they appear only after the discard animation plus their own pop-in, later than hand tiles. Raise this if buttons are still missing clicks."
-    },
-    "overlay": "Suggestion overlay",
-    "overlay_enabled": "Show overlay window",
-    "overlay_enabled_hint": "A small always-on-top window that floats over the game and shows the bot's top suggestions. Drag it anywhere; resize it from its edges.",
-    "overlay_top_n": "Suggestions shown",
-    "overlay_opacity": "Opacity",
-    "overlay_always_on_top": "Keep above other windows",
-    "overlay_always_on_top_hint": "Turn this off to park the overlay on a second monitor. Note that a game running in exclusive fullscreen draws over every always-on-top window — use borderless or windowed mode."
+    }
   },
   "setup": {
     "title": "Akagi Setup",
@@ -593,12 +586,13 @@
     "install_repo_hint_post": ").",
     "install_glob": "Asset glob (optional)",
     "install_local_name": "Local name (optional, defaults to repo name)",
+    "install_zip_name": "Bot name (optional, defaults to file name)",
     "install_zip_btn": "Install from ZIP",
     "install_zip_title": "Install bot from a local ZIP file",
     "install_zip_path": "ZIP file",
     "install_zip_path_placeholder": "/path/to/bot.zip",
     "install_zip_browse": "Browse…",
-    "install_zip_path_hint": "Pick a local .zip, or paste its full path.",
+    "install_zip_path_hint": "Pick a local .zip file.",
     "drawer_loading": "Loading…",
     "drawer_reinstall": "Reinstall environment",
     "drawer_reinstall_tooltip": "Wipe and recreate the Python virtualenv for this bot",
@@ -750,11 +744,7 @@
       "reset_hint": "Changed your mind? \"Reset Layout\" restores the default arrangement anytime.",
       "got_it": "Got it",
       "help_aria": "Show board tips"
-    },
-    "overlay": "Overlay",
-    "overlay_show": "Show the suggestion overlay",
-    "overlay_hide": "Hide the suggestion overlay",
-    "overlay_toggle_failed": "Could not toggle the overlay"
+    }
   },
   "mahjong": {
     "riichi": "Riichi",
@@ -914,9 +904,5 @@
   "install_overlay": {
     "title": "Installing…",
     "warning": "Please don’t close the app or start a game until the installation finishes."
-  },
-  "overlay": {
-    "close": "Close overlay",
-    "empty": "Waiting for the bot…"
   }
 }

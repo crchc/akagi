@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Channel } from '@tauri-apps/api/core'
-import { invoke, HAS_TAURI } from '@/lib/tauri'
+import { listen } from '@/lib/api'
 import { useInspectorStore } from '@/stores/inspectorStore'
 import type { InspectorEntry } from '@/types'
 
@@ -22,7 +21,7 @@ export function useInspectorStream(enabled: boolean): void {
   const rafRef = useRef<number | null>(null)
 
   useEffect(() => {
-    if (!HAS_TAURI || !enabled) return
+    if (!enabled) return
 
     let cancelled = false
 
@@ -34,21 +33,18 @@ export function useInspectorStream(enabled: boolean): void {
       appendBatch(buf)
     }
 
-    const channel = new Channel<InspectorEntry>()
-    channel.onmessage = (entry) => {
+    let unlisten: (() => void) | undefined
+    listen<InspectorEntry>('inspector-entry', (entry) => {
       if (cancelled) return
       bufferRef.current.push(entry)
       if (rafRef.current == null) {
         rafRef.current = requestAnimationFrame(flush)
       }
-    }
-
-    invoke<void>('subscribe_inspector', { onEvent: channel }).catch((err) => {
-      console.warn('subscribe_inspector failed:', err)
-    })
+    }).then((stop) => { unlisten = stop })
 
     return () => {
       cancelled = true
+      unlisten?.()
       if (rafRef.current != null) {
         cancelAnimationFrame(rafRef.current)
         rafRef.current = null

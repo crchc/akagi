@@ -8,13 +8,13 @@ import { Toaster } from '@/components/ui/sonner'
 import { UpdateNotifier } from '@/components/UpdateNotifier'
 import { AnnouncementsDialog } from '@/components/AnnouncementsDialog'
 import { InstallBlockingOverlay } from '@/components/InstallBlockingOverlay'
-import { useTauriBridge } from '@/hooks/useTauriBridge'
+import { useBackendBridge } from '@/hooks/useBackendBridge'
 import { useSidebar } from '@/hooks/useSidebar'
 import { useUiPrefsStore } from '@/stores/uiPrefsStore'
 import { cn } from '@/lib/utils'
 
 export default function App() {
-  useTauriBridge()
+  useBackendBridge()
   const location = useLocation()
   const scale = useUiPrefsStore((s) => s.scale)
   const isOpen = useSidebar((s) => s.isOpen)

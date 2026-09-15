@@ -167,14 +167,6 @@ export type NativeApiConfig = {
   react_timeout_ms: number
 }
 
-/** The always-on-top suggestion overlay. Mirrors `crate::config::OverlayConfig`. */
-export type OverlayConfig = {
-  enabled: boolean
-  top_n: number
-  opacity: number
-  always_on_top: boolean
-}
-
 /** How GitHub-hosted downloads are routed. Mirrors
  *  `crate::config::GithubMirrorMode` (serde snake_case). */
 export type GithubMirrorMode = 'auto' | 'direct' | 'mirror'
@@ -186,13 +178,6 @@ export type NetworkConfig = {
    *  tried before the built-in mirror list. Empty = unset. */
   github_custom_mirror: string
 }
-
-/** Bounds enforced by `crate::config::overlay` — mirrored so the UI can't
- *  offer a value the backend would silently clamp. */
-export const OVERLAY_TOP_N_MIN = 1
-export const OVERLAY_TOP_N_MAX = 5
-export const OVERLAY_OPACITY_MIN = 0.3
-export const OVERLAY_OPACITY_MAX = 1.0
 
 export type AppConfig = {
   general: { first_run_completed: boolean; developer_mode: boolean }
@@ -209,7 +194,6 @@ export type AppConfig = {
   }
   capture: CaptureConfig
   autoplay: AutoplayConfig
-  overlay: OverlayConfig
   network: NetworkConfig
 }
 
@@ -668,9 +652,7 @@ export type HistoryEvent =
 //
 // Mirrors `crate::schema::ipc::{LogEntry, LogSessionInfo, ReadLogRequest,
 // ReadLogResponse}`. The same shape is used both for entries read off
-// disk (`read_log_session`) and for live-tailed entries delivered over a
-// `tauri::ipc::Channel` (`subscribe_log_events`) — initial-load and live
-// arrivals merge into the same UI list without translation.
+// disk (`read_log_session`) and over the live SSE stream.
 
 export type LogLevel = 'TRACE' | 'DEBUG' | 'INFO' | 'WARN' | 'ERROR'
 
@@ -714,8 +696,7 @@ export type ReadLogResponse = {
 //
 // Mirrors `crate::schema::inspector::*` and `crate::schema::ipc::ReadInspector*`.
 // Tagged on `kind` — switch on the discriminant to render kind-specific
-// detail panels. Same shape arrives via `subscribe_inspector` (live tail)
-// and `read_inspector` (past sessions), so renderers don't fork.
+// detail panels. Live SSE and `read_inspector` use the same shape.
 
 export type FrameDirection = 'up' | 'down'
 

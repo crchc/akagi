@@ -28,7 +28,7 @@ import i18n from 'i18next'
 // The raw sonner toast, not the ui wrapper: the "review done" toast carries
 // an Open action button, which the wrapper's narrow options don't expose.
 import { toast as rawToast } from 'sonner'
-import { invoke } from '@/lib/tauri'
+import { invoke } from '@/lib/api'
 import { openExternal } from '@/lib/external'
 import { toast } from '@/components/ui/sonner'
 import { useConfigStore } from '@/stores/configStore'
@@ -95,7 +95,7 @@ export function reviewApiCfg(): { baseUrl: string; proxy: string; key: string } 
   return { baseUrl, proxy: api.proxy_enabled ? api.proxy.trim() : '', key }
 }
 
-/** True when an IPC error string is a genuine server 404 — matched on the
+/** True when an API error string is a genuine server 404 — matched on the
  *  exact "<what> failed: HTTP 404" shape the Rust client's `check()` emits.
  *  A bare `includes('404')` would misfire on transport errors, which carry
  *  the full request URL (reqwest appends "for url (…)"): `404` can appear in

@@ -2,7 +2,7 @@
 //!
 //! `GameRecord` is what `crate::history::recorder` writes to
 //! `<history_root>/index.jsonl` (one JSON line per finalised game) and what
-//! the frontend reads back via Tauri commands. It mirrors the shape of
+//! the frontend reads through the Web API. It mirrors the shape of
 //! the `Stat` record from Mortal's `libriichi` for per-game counts so
 //! summing across records gives stat-equivalent aggregates.
 //!
@@ -277,14 +277,14 @@ impl HistoryFilter {
 // ---------- HistoryEvent ----------
 
 /// Backend → frontend notification when a new record lands. Forwarded as
-/// the Tauri `history-recorded` event.
+/// the SSE `history-recorded` event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HistoryEvent {
     /// A finalised game was just appended to the index. Payload is the
     /// full record so the frontend can prepend without an extra fetch.
     Recorded { record: Box<GameRecord> },
-    /// A record (and its mjai log copy) was deleted via the IPC command.
+    /// A record and its mjai log were deleted through the Web API.
     Deleted { id: String },
 }
 

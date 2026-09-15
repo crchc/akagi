@@ -30,7 +30,7 @@ import {
 } from '@/components/review/gameReviewStatus'
 import { ReviewSubmitDialog } from '@/components/review/ReviewSubmitDialog'
 import { useKeyStatus } from '@/hooks/useKeyStatus'
-import { invoke } from '@/lib/tauri'
+import { invoke } from '@/lib/api'
 import { openExternal } from '@/lib/external'
 import { roomLabelKey } from '@/lib/matchInfo'
 import { computePt, type PtRule } from '@/lib/ptCalc'

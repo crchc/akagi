@@ -161,9 +161,9 @@ Akagi 以 portable zip 發佈 — 每個平台一個自帶所需檔案的資料�
 
 | OS | 檔案 | 備註 |
 |---|---|---|
-| Windows | `akagi-<version>-windows-x64.zip` | x86_64。需要 WebView2(Win10 1803+ 與 Win11 已預載)。SmartScreen 會警告 — 點 *More info → Run anyway*。 |
+| Windows | `akagi-<version>-windows-x64.zip` | x86_64。SmartScreen 會警告 — 點 *More info → Run anyway*。 |
 | macOS | `akagi-<version>-macos-arm64.zip` | Apple Silicon。未簽章,解壓後執行一次 `xattr -cr <解壓後資料夾>`,或第一次右鍵 → *Open*。 |
-| Linux | `akagi-<version>-linux-x64.zip` | 在 `ubuntu-22.04` 上建置(glibc 2.35+)。需要 WebKit2GTK 4.1(`apt install libwebkit2gtk-4.1-0` / `dnf install webkit2gtk4.1` / `pacman -S webkit2gtk-4.1`)。 |
+| Linux | `akagi-<version>-linux-x64.zip` | 在 `ubuntu-22.04` 上建置(glibc 2.35+)。 |
 
 首次啟動時會引導你完成語言、平台、抓包模式、bot 設定，
 以及 CA 信任（僅 MITM 模式才需要）。沒有 bot 要安裝 ——
@@ -273,7 +273,7 @@ Akagi 內建一個 **純 Rust 的 bot**，它是兩種模式的預設值（`bot.
   刪除 index 條目與該局的 `.mjai.jsonl`。
 
 PT 規則與過濾條件會持久化於 `localStorage`。Bridge 啟動
-時從 backend 載入紀錄，並透過 `history-recorded` Tauri
+時從 backend 載入紀錄，並透過 `history-recorded` SSE
 事件保持同步。
 
 數學細節、儲存 schema，以及如何新增平台 / 統計欄位 /
@@ -419,29 +419,15 @@ alpha.8 已完成：
 類型的單一真相來源。
 
 ```
-                ┌────────────────────────┐
-   遊戲客戶端 ─│  capture (mitm | cdp)  │── CA 位於 ./ca（僅 mitm）
-   WebSocket   └─────────┬──────────────┘
-                          ▼
-                ┌────────────────────────┐
-                │  bridge::<platform>    │   wire bytes → MjaiEvent
-                └─────────┬──────────────┘
-                          ▼ MjaiBus
-       ┌──────────────────┼──────────────────┐
-       ▼                  ▼                  ▼
-  game_state::tracker   bot::manager     ipc forwarder
-       │                  │                  │
-       ▼ PostBus          ▼ BotResponseBus   ▼ app.emit
-  analysis::runner   內建 NN（行程內）    Tauri webview
-       │             | 雲端 API
-       ▼ AnalysisBus  | mjai 子行程
-       └──► ipc forwarder ──► app.emit
+遊戲客戶端 → capture → bridge → event buses
+                                  ├→ tracker / bot / analysis / autoplay
+                                  └→ Web SSE → 瀏覽器
+瀏覽器 → HTTP 指令 → backend
 ```
 
 [`src/lib.rs`](./src/lib.rs) 在啟動時把這些 bus 接起來。
-前端透過 push 事件（`mjai-event`、`bot-response`、
-`bot-status`…）與 pull 指令和 backend 溝通，兩者的清單
-都在 [`src/ipc/README.md`](./src/ipc/README.md)。開啟
+前端透過 SSE 事件與 HTTP 指令和 backend 溝通，介面清單在
+[`src/ipc/README.md`](./src/ipc/README.md)。開啟
 AutoPlay 時，`autoplay` manager 會取用 bot 的決策，並透過
 Chromium 抓包 backend（CDP）執行：雀魂是在牌桌上點擊，天鳳的
 客戶端協定夠單純，則直接透過對局連線送出動作。
@@ -450,7 +436,7 @@ Chromium 抓包 backend（CDP）執行：雀魂是在牌桌上點擊，天鳳的
 
 | 層級 | 技術 |
 |---|---|
-| Shell | [Tauri](https://tauri.app) 2 |
+| Shell | [Axum](https://github.com/tokio-rs/axum) HTTP/SSE |
 | Backend | Rust（edition 2021）、`tokio`、`tracing`、`clap` |
 | MITM | [`hudsucker`](https://crates.io/crates/hudsucker) 0.24（`rcgen-ca`、`rustls-client`） |
 | CDP capture | [`chromiumoxide`](https://crates.io/crates/chromiumoxide) 0.9 |
@@ -485,10 +471,10 @@ Chromium 抓包 backend（CDP）執行：雀魂是在牌桌上點擊，天鳳的
 │   ├── github/        GitHub Releases client（bot 安裝、自我更新）
 │   ├── history/       對局回放儲存與索引
 │   ├── inspector/     訊框 / 事件 / bot reaction broadcaster
-│   ├── ipc/           Tauri 指令、app state、capture supervisor
+│   ├── ipc/           HTTP 指令、app state、capture supervisor
 │   ├── logger/        每 session 紀錄目錄與每 target 檔案 appender
 │   ├── proxy/         透過 hudsucker 的 MITM HTTP/HTTPS/WS；CA 位於 ./ca
-│   ├── schema/        MjaiEvent enum 與 IPC payload 類型
+│   ├── schema/        MjaiEvent enum 與 API payload 類型
 │   ├── updater/       應用程式內自我更新（檢查 + 套用）
 │   └── lib.rs         啟動與接線
 ├── native_bot/        內建 bot crate：obs/action codec、candle CNN、內嵌權重
@@ -501,9 +487,6 @@ Chromium 抓包 backend（CDP）執行：雀魂是在牌桌上點擊，天鳳的
 │       ├── stores/    Zustand store，一個領域一個（game、bot、config、theme…）
 │       └── i18n/      en / ja / zh-TW / zh-CN
 ├── tests/             整合測試
-├── capabilities/      Tauri 權限
-├── icons/             應用程式圖示
-├── tauri.conf.json    視窗與 bundle 設定
 └── Cargo.toml
 ```
 
@@ -546,7 +529,7 @@ mjai_bot/<name>/
 
 **Bots** 頁籤可以從 GitHub release 或本機 ZIP 安裝 bot。
 
-IPC 指令 `install_bot_from_github(repo, asset_glob?, name?)` 會抓取最新
+Web API 介面 `install_bot_from_github(repo, asset_glob?, name?)` 會抓取最新
 release zip，解壓至 `mjai_bot/<name>/`，驗證 `bot.py`，並執行一次
 `uv sync`。後續啟動很快 —— sync 會根據
 `mjai_bot/<name>/.akagi/synced.stamp` 戳記決定是否跳過。
@@ -569,26 +552,21 @@ Bot 以 Akagi 啟動的 **獨立 OS 子行程** 執行。通訊嚴格透過 stdi
 
 - Rust（最新 stable，1.80+）
 - Node.js 20+ 與 npm
-- Tauri 2 系統相依：
-  - **Linux**：`libwebkit2gtk-4.1-dev`、`libgtk-3-dev`、
-    `libayatana-appindicator3-dev`、`librsvg2-dev`、
-    `protobuf-compiler`
-  - **macOS**：Xcode Command Line Tools
-  - **Windows**：WebView2（Windows 11 已預先安裝）
+- 不需要桌面 GUI 系統相依套件。
 
 **執行 / 建置**
 
 ```bash
-# Debug — 啟動 GUI;Vite dev-server 由 Tauri 代理
+# 建置 Web UI，然後在 3000 連接埠啟動本機服務
+npm ci --prefix frontend && npm run --prefix frontend build
 cargo run
 
 # 指定設定檔路徑
 cargo run -- --config ./my-config.toml
 
 # 為當前目標建置 portable zip
-cargo install tauri-cli --locked          # 若尚未安裝
 bash scripts/fetch-runtime.sh             # 抓取 runtime/<triple>/
-cargo tauri build --no-bundle             # 產出 target/<triple>/release/akagi
+cargo build --release             # 產出 target/<triple>/release/akagi
 bash scripts/package-zip.sh <target-triple>
 # → dist/akagi-<version>-<os>-<arch>.zip
 

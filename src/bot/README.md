@@ -24,7 +24,7 @@ bridge to them.
   for the user-triggered "Reinstall environment" path. See "Bundled
   runtime" below for how the bundled binaries are fetched and shipped.
 - `sync_guard` — `SyncGuard`: per-bot mutual exclusion for `uv sync`.
-  Both `BotManager::spawn_runner` (game-start sync) and the IPC
+  Both `BotManager::spawn_runner` (game-start sync) and the Web API
   `sync_bot_deps` command (Reinstall environment) acquire-or-bail on the
   bot name through a shared `Arc<Mutex<HashSet<String>>>` so two parallel
   syncs against the same venv can't trample each other.
@@ -35,7 +35,7 @@ bridge to them.
   waits 500 ms, then SIGKILL's and respawns. The stderr pump doubles as a
   bot→frontend notification channel: a line prefixed with `NOTIFY_PREFIX`
   (`@@AKAGI_NOTIFY@@ `) followed by a JSON `Notification` is parsed and
-  forwarded onto the `NotifyBus` (→ `notify` Tauri event → bottom-right
+  forwarded onto the `NotifyBus` (→ `notify` SSE event → bottom-right
   toast); every other line is logged as before, and a malformed payload
   after the prefix is dropped with a `warn!`.
 - `manager` — `BotManager`: subscribes to the **post-tracker bus**,
@@ -73,18 +73,18 @@ bridge to them.
   short `REACT_TIMEOUT` because it blocks the bot's turn; everything else uses
   the client-wide `REQUEST_TIMEOUT`. Building an `ApiClient` builds a fresh
   connection pool, so hold one and reuse it. Consumed by `NativeBot` and by the
-  `native_api_*` IPC commands (redeem a code, check a key, list models).
+  `native_api_*` operations (redeem a code, check a key, list models).
   Also wraps the whole-game review surface behind the Review page:
   `submit_review` (gzipped `POST /v3/review`, its own generous
   `REVIEW_SUBMIT_TIMEOUT` — the server replays the full game at submit),
   `review_status` (job poll; meta-only — result bodies are served solely
   through the share URL), `review_share` (issue/re-issue the public link),
   `shares` (list) and `revoke_share`. Ids interpolated into URL paths are
-  validated to ASCII alphanumerics first. The submit IPC command
+  validated to ASCII alphanumerics first. The submit operation
   (`native_api_review_history_game`) loads the recorded history log in Rust
   and shapes it with `native::build_api_events`, so `/v3/review` sees the
   identical censored perspective `/v3/react` does and the whole-game log
-  never round-trips through the webview.
+  never round-trips through the browser.
 - `purchase` — the unauthenticated payment handshakes used by the in-app "Buy
   key" flow, one per provider. PayPal: `create_order` / `create_subscription`
   return an `approve_url` plus a `claim_secret`, and `order_result` /
@@ -104,7 +104,7 @@ bridge to them.
   unexpected field risks a `400`.) Prices are server-owned — only the product
   id crosses the wire, and no client secret is embedded in the binary.
   Stateless like `api`; the polling state machine lives in the frontend's
-  purchase store, driven through the `native_api_*` IPC commands.
+  purchase store, driven through the `native_api_*` operations.
 - `supervisor` — `run_bot_manager`: constructs the `BotManager` and drives
   its run loop off the `PostTrackerBus`. Tolerates a missing Python runtime
   — the built-in `native` bots need none.
@@ -146,7 +146,7 @@ it is in its response phase, including the seats with nothing to claim).
 
 The built-in bot attaches a `meta.show` card — the ranked candidates with their
 policy probabilities — to its `BotResponse`. The frontend renders it in the Bot
-Show tile and the suggestion overlay. One rule governs it, and everything in
+Show tile and the Suggestions tab. One rule governs it, and everything in
 `native.rs` that touches `meta` exists to keep it true:
 
 > **The card changes exactly when the bot chose something, and never otherwise.**
@@ -295,7 +295,7 @@ should warn the user accordingly.
 
 ## Installing from GitHub
 
-The `install_bot_from_github` IPC command fetches the latest release of
+The `install_bot_from_github` Web API operation fetches the latest release of
 a public GitHub repo, picks one asset, and drops it into
 `mjai_bot/<name>/`. Frontend usage:
 
@@ -344,7 +344,7 @@ and other bot-local files are not preserved.
 
 ## Installing from a local ZIP
 
-The `install_bot_from_zip` IPC command installs a bot from a `.zip`
+The `install_bot_from_zip` Web API operation installs a bot from a `.zip`
 already on disk — offline installs, a locally-built bot, or an archive
 received out-of-band. Frontend usage:
 
@@ -368,11 +368,11 @@ warnings, atomic rename into `mjai_bot/<name>/`, and the post-install
 
 Progress is reported through `NotifyBus` under sticky id
 `bot-install-<name>`, identical to the GitHub install. The frontend picks
-the file with the native OS dialog (`@tauri-apps/plugin-dialog`).
+the file with the native OS dialog (browser file picker).
 
 ### Reinstall environment
 
-The `sync_bot_deps(name, force)` IPC command re-runs `uv sync` for an
+The `sync_bot_deps(name, force)` Web API operation re-runs `uv sync` for an
 already-installed bot. With `force = true` (the only mode the frontend
 button uses) the `.akagi/synced.stamp` and `.akagi/venv/` are wiped first
 so a corrupted venv is rebuilt from scratch — incremental sync against a
@@ -420,11 +420,11 @@ target binaries exist.
 
 ### Bundling
 
-`tauri.conf.json` ships the tree via `bundle.resources = ["runtime/**/*"]`.
+`scripts/package-zip.sh` ships the runtime tree beside the executable.
 The `runtime/` directory is `.gitignore`'d (`runtime/*` with
 `!runtime/.gitkeep` exception) so the placeholder file keeps the glob
 non-empty even before `fetch-runtime.sh` runs. CI must re-run the
-script once per matrix target before `tauri build`.
+script once per matrix target before `cargo build --release`.
 
 ## Why subprocess
 
@@ -444,7 +444,7 @@ picks the slot matching `start_game.num_players` (3 → `active_3p`, else
 `active_4p`). Empty slot ⇒ no runner spawned for that game (analysis
 still runs).
 
-Frontend → backend: `set_active_bot(mode, name)` IPC command, where
+Frontend → backend: `set_active_bot(mode, name)` Web API operation, where
 `mode` is `"4p"` or `"3p"` and `name` is the bot subdir name (or `""`
 to clear the slot). The Bots route shows two switches per row.
 
@@ -455,7 +455,7 @@ in-game spawn would run `uv sync`, which can exceed the react time limit and
 error. `BotInfo.env_ready` surfaces this to the frontend, which disables the
 activation switch (and shows a tooltip) until the env is installed. A bot with
 no `pyproject.toml` has nothing to install and is always `env_ready`. The
-install/sync IPC paths run `uv sync` to completion before returning, and the
+install/sync API paths run `uv sync` to completion before returning, and the
 frontend shows a non-dismissible blocking overlay for their whole duration, so
 the user can't navigate away or start a game mid-install.
 

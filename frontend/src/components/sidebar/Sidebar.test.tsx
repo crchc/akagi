@@ -16,10 +16,6 @@ vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: () => {} },
 }))
 
-vi.mock('@tauri-apps/api/app', () => ({
-  getVersion: vi.fn().mockResolvedValue('0.0.0-test'),
-}))
-
 function renderSidebar(initialPath = '/') {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>

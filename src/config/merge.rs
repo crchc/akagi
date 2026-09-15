@@ -41,6 +41,8 @@ pub fn merge_into<T: serde::Serialize>(config: &T, existing: &str) -> Result<Str
         .parse()
         .map_err(|e| format!("{e}"))?;
     merge_table(doc.as_table_mut(), fresh.as_table(), &mut Vec::new());
+    // Remove the retired desktop overlay from existing configs.
+    doc.remove("overlay");
     Ok(doc.to_string())
 }
 
@@ -279,7 +281,7 @@ future_knob = 42
 [autoplay.delay.lognormal]
 reach = [1.0, 0.5]
 
-[overlay]
+[legacy_plugin]
 enabled = true
 ";
         let out = merge_into(&AppConfig::default(), existing).unwrap();
@@ -289,9 +291,16 @@ enabled = true
             "{out}"
         );
         assert!(
-            out.find("[autoplay.delay.lognormal]") < out.find("[overlay]"),
+            out.find("[autoplay.delay.lognormal]") < out.find("[legacy_plugin]"),
             "the table moved:\n{out}"
         );
+    }
+
+    #[test]
+    fn obsolete_overlay_section_is_removed() {
+        let existing = "[overlay]\nenabled = true\ntop_n = 3\n";
+        let out = merge_into(&AppConfig::default(), existing).unwrap();
+        assert!(!out.contains("[overlay]"), "{out}");
     }
 
     /// The real thing: a config file holding a section from some other build
@@ -321,7 +330,7 @@ level = 3
         assert!(back.general.first_run_completed);
         // ...and the sections this build owns are all present now.
         assert!(out.contains("[bot]"), "{out}");
-        assert!(out.contains("[overlay]"), "{out}");
+        assert!(out.contains("[network]"), "{out}");
     }
 
     /// A hand-written file may use dotted keys where we emit header tables
