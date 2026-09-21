@@ -160,6 +160,9 @@ impl Default for DelayModelConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MajsoulAutoplayConfig {
+    /// Number of complete games to play in this process, including the
+    /// current game. 1 disables automatic rematching.
+    pub total_games: u32,
     /// Lower bound of the random pre-click delay (ms). The reference
     /// Akagi autoplay used `random.uniform(1.0, 3.0)` seconds; the same
     /// distribution is replicated here as `[1000, 3000]` ms by default.
@@ -217,6 +220,7 @@ pub struct MajsoulAutoplayConfig {
 impl Default for MajsoulAutoplayConfig {
     fn default() -> Self {
         Self {
+            total_games: 1,
             pre_click_delay_min_ms: 1000,
             pre_click_delay_max_ms: 3000,
             inter_click_delay_ms: 300,
@@ -258,5 +262,13 @@ mod tests {
         assert_eq!(cfg.delay.mode, default.mode);
         assert_eq!(cfg.delay.min_button_delay_ms, default.min_button_delay_ms);
         assert!(!cfg.delay.lognormal.is_empty());
+    }
+
+    #[test]
+    fn older_majsoul_config_does_not_enable_rematching() {
+        let cfg: AutoplayConfig =
+            toml::from_str("enabled = true\n[majsoul]\nclick_hold_ms = 120\n").unwrap();
+        assert_eq!(cfg.majsoul.total_games, 1);
+        assert_eq!(cfg.majsoul.click_hold_ms, 120);
     }
 }

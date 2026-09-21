@@ -47,6 +47,7 @@ function makeConfig(over: {
     autoplay: {
       enabled: false,
       majsoul: {
+        total_games: 1,
         pre_click_delay_min_ms: 0,
         pre_click_delay_max_ms: 0,
         inter_click_delay_ms: 0,

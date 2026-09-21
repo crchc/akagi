@@ -12,6 +12,7 @@ import {
   type IndicatorTone,
 } from '@/lib/statusIndicators'
 import { NATIVE_3P, NATIVE_4P } from '@/lib/nativeBots'
+import { AutoplayControls } from '@/components/AutoplayControls'
 
 function IndicatorDot({
   tone,
@@ -78,13 +79,16 @@ export function Statusbar() {
     nativeActive
 
   return (
-    <footer className="flex items-center justify-between border-t border-border px-4 py-1.5 text-xs text-muted-foreground bg-muted/30">
+    <footer className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border px-4 py-1.5 text-xs text-muted-foreground bg-muted/30">
       <IndicatorDot
         tone={capTone}
         label={t(CAPTURE_LABEL[capTone])}
         title={captureTitle}
       />
-      <span className="flex items-center gap-3">
+      <div className="order-3 flex w-full justify-center sm:order-none sm:ml-auto sm:w-auto">
+        <AutoplayControls />
+      </div>
+      <span className="ml-auto flex items-center gap-3 sm:ml-0">
         {usingApi && (
           <IndicatorDot
             tone={degraded ? 'fault' : 'live'}

@@ -127,6 +127,13 @@ impl AutoplayManager {
             )
             .await;
         });
+        // Result screens need their own bus subscription: bot decisions can
+        // still be draining when the game-end notification arrives.
+        tokio::spawn(crate::autoplay::majsoul_rematch::watch(
+            self.cfg.clone(),
+            self.ctx.clone(),
+            self.mjai_bus.clone(),
+        ));
 
         loop {
             tokio::select! {

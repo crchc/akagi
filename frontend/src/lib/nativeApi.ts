@@ -75,7 +75,7 @@ export async function persistApiConfig(api: NativeApiConfig): Promise<void> {
   const cfg = store.config
   if (!cfg) return
   const { next, switched } = withNativeBotForApi(cfg, api)
-  await invoke('update_config', { newConfig: next })
-  store.setConfig(next)
+  const saved = await invoke<AppConfig>('update_config_preserving_controls', { newConfig: next })
+  store.setConfig(saved)
   if (switched) toast.info(i18n.t('bots.api.native_selected'))
 }

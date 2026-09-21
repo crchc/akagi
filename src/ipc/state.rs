@@ -52,6 +52,8 @@ impl Default for CaptureControl {
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<RwLock<AppConfig>>,
+    /// Serialises full config saves with the status bar's field updates.
+    pub config_update_lock: Arc<Mutex<()>>,
     pub config_path: Arc<PathBuf>,
     pub log_session: Arc<Session>,
 
@@ -143,6 +145,7 @@ impl AppState {
     ) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
+            config_update_lock: Arc::new(Mutex::new(())),
             config_path: Arc::new(config_path),
             log_session,
             mjai_bus,

@@ -219,6 +219,17 @@ async fn invoke(
                 Err(e) => answer::<(), _>(Err(e)),
             }
         }
+        "update_config_preserving_controls" => {
+            let new_config = field(&body, "newConfig", "new_config");
+            match new_config {
+                Ok(v) => answer(commands::update_config_preserving_controls(v, &state).await),
+                Err(e) => answer::<(), _>(Err(e)),
+            }
+        }
+        "update_autoplay_controls" => {
+            opt_args!(body, enabled: bool, total_games: u32);
+            answer(commands::update_autoplay_controls(enabled, total_games, &state).await)
+        }
         "list_bots" => answer(commands::list_bots(&state).await),
         "get_bot_settings" => {
             args!(body, name: String);

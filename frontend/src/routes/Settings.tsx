@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useBlocker } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -67,18 +67,32 @@ export function Settings() {
   const stored = useConfigStore((s) => s.config)
   const setStored = useConfigStore((s) => s.setConfig)
   const [draft, setDraft] = useState<AppConfig | null>(stored)
+  const previousStored = useRef(stored)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  // Riichi City autoplay is MITM frame injection — pop a risk warning the
-  // moment the draft combines the two, from either direction (platform
-  // switched to Riichi City while autoplay is on, or autoplay switched on
-  // while the platform is Riichi City).
+  // Switching to Riichi City while autoplay is already on still needs the
+  // same warning shown by the persistent control when enabling it there.
   const [rcAutoplayWarnOpen, setRcAutoplayWarnOpen] = useState(false)
 
   useEffect(() => {
-    // Sync the editable draft from the store when it (re)loads.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (stored) setDraft(stored)
+    // Quick controls save while Settings may have unsaved edits. Keep those
+    // edits, but always bring the two status-bar fields up to date.
+    const before = previousStored.current
+    previousStored.current = stored
+    if (stored) setDraft((prev) => {
+      if (!prev || !before || JSON.stringify(prev) === JSON.stringify(before)) return stored
+      return {
+        ...prev,
+        autoplay: {
+          ...prev.autoplay,
+          enabled: stored.autoplay.enabled,
+          majsoul: {
+            ...prev.autoplay.majsoul,
+            total_games: stored.autoplay.majsoul.total_games,
+          },
+        },
+      }
+    })
   }, [stored])
 
   useEffect(() => {
@@ -112,8 +126,9 @@ export function Settings() {
     setSaving(true)
     setErr(null)
     try {
-      await invoke('update_config', { newConfig: draft })
-      setStored(draft)
+      const saved = await invoke<AppConfig>('update_config_preserving_controls', { newConfig: draft })
+      setDraft(saved)
+      setStored(saved)
     } catch (e) {
       setErr(String(e))
     } finally {
@@ -125,8 +140,9 @@ export function Settings() {
     setSaving(true)
     setErr(null)
     try {
-      await invoke('update_config', { newConfig: draft })
-      setStored(draft)
+      const saved = await invoke<AppConfig>('update_config_preserving_controls', { newConfig: draft })
+      setDraft(saved)
+      setStored(saved)
       blocker.proceed?.()
     } catch (e) {
       setErr(String(e))
@@ -283,7 +299,6 @@ export function Settings() {
       <AutoplayCard
         draft={draft}
         setDraft={setDraft}
-        onRiichiCityAutoplay={() => setRcAutoplayWarnOpen(true)}
       />
 
       <NetworkCard draft={draft} setDraft={setDraft} />
@@ -733,16 +748,15 @@ function PlatformCard({
 function AutoplayCard({
   draft,
   setDraft,
-  onRiichiCityAutoplay,
 }: {
   draft: AppConfig
   setDraft: (c: AppConfig) => void
-  onRiichiCityAutoplay: () => void
 }) {
   const { t } = useTranslation()
   const ap = draft.autoplay ?? {
     enabled: false,
     majsoul: {
+      total_games: 1,
       pre_click_delay_min_ms: 1000,
       pre_click_delay_max_ms: 3000,
       inter_click_delay_ms: 300,
@@ -756,12 +770,6 @@ function AutoplayCard({
     delay: defaultDelayModel(),
   }
   const delay = ap.delay ?? defaultDelayModel()
-  const captureIsChromium = draft.capture?.mode === 'chromium'
-  // Riichi City autoplay runs through the MITM proxy (frame injection), so
-  // the Chromium-mode requirement only applies to the click platforms.
-  const platformIsRiichiCity = draft.platform?.kind === 'RiichiCity'
-  const setApField = (patch: Partial<typeof ap>) =>
-    setDraft({ ...draft, autoplay: { ...ap, ...patch } })
   const setMajsoulField = (patch: Partial<typeof ap.majsoul>) =>
     setDraft({
       ...draft,
@@ -778,22 +786,6 @@ function AutoplayCard({
         <CardTitle>{t('settings.autoplay.title')}</CardTitle>
       </CardHeader>
       <CardContent className="grid gap-4">
-        <Toggle
-          label={t('settings.autoplay.enable')}
-          value={ap.enabled}
-          onChange={(v) => {
-            setApField({ enabled: v })
-            if (v && platformIsRiichiCity) onRiichiCityAutoplay()
-          }}
-        />
-        <p className="text-xs text-muted-foreground">
-          {t('settings.autoplay.enable_help')}
-        </p>
-        {ap.enabled && !captureIsChromium && !platformIsRiichiCity && (
-          <p className="text-xs text-amber-500">
-            {t('settings.autoplay.requires_chromium')}
-          </p>
-        )}
         {/* Delay policy: exactly one of legacy (fixed uniform) or the
             Lua-scripted human-like model is active. */}
         <Field label={t('settings.autoplay.delay_mode')}>

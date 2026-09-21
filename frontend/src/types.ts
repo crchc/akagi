@@ -98,6 +98,8 @@ export type DetectedBrowser = {
 export type PlatformKind = 'Majsoul' | 'Tenhou' | 'RiichiCity'
 
 export type MajsoulAutoplayConfig = {
+  /** Complete games in this run, including the current one. 1 = no rematch. */
+  total_games: number
   pre_click_delay_min_ms: number
   pre_click_delay_max_ms: number
   inter_click_delay_ms: number

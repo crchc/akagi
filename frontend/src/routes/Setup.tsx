@@ -197,8 +197,8 @@ export function Setup() {
           active_3p: draft.bot.api.enabled ? NATIVE_3P : has3p ? BOT_3P_NAME : draft.bot.active_3p,
         },
       }
-      await invoke('update_config', { newConfig: final })
-      setStored(final)
+      const saved = await invoke<AppConfig>('update_config_preserving_controls', { newConfig: final })
+      setStored(saved)
       navigate('/', { replace: true })
     } catch (e) {
       setErr(String(e))

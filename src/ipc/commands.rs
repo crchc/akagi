@@ -76,6 +76,56 @@ pub async fn get_config(state: State<'_, AppState>) -> CmdResult<AppConfig> {
 /// `bot.enabled` back to false still requires a relaunch to actually
 /// stop it).
 pub async fn update_config(new_config: AppConfig, state: State<'_, AppState>) -> CmdResult<()> {
+    let _save = state.config_update_lock.lock().await;
+    apply_config(new_config, state, true).await
+}
+
+/// Save a full UI config draft while keeping the two live status-bar
+/// controls at their current values. This merge happens under the same lock
+/// as status-bar updates, so a stale page draft cannot undo a quick edit.
+pub async fn update_config_preserving_controls(
+    mut new_config: AppConfig,
+    state: State<'_, AppState>,
+) -> CmdResult<AppConfig> {
+    let _save = state.config_update_lock.lock().await;
+    let current = state.config.read().await;
+    preserve_autoplay_controls(&mut new_config, &current);
+    drop(current);
+    apply_config(new_config.clone(), state, true).await?;
+    Ok(new_config)
+}
+
+fn preserve_autoplay_controls(draft: &mut AppConfig, current: &AppConfig) {
+    draft.autoplay.enabled = current.autoplay.enabled;
+    draft.autoplay.majsoul.total_games = current.autoplay.majsoul.total_games;
+}
+
+/// Update only the controls exposed in the persistent status bar.
+pub async fn update_autoplay_controls(
+    enabled: Option<bool>,
+    total_games: Option<u32>,
+    state: State<'_, AppState>,
+) -> CmdResult<AppConfig> {
+    if total_games == Some(0) {
+        return Err("total_games must be at least 1".into());
+    }
+    let _save = state.config_update_lock.lock().await;
+    let mut next = state.config.read().await.clone();
+    if let Some(value) = enabled {
+        next.autoplay.enabled = value;
+    }
+    if let Some(value) = total_games {
+        next.autoplay.majsoul.total_games = value;
+    }
+    apply_config(next.clone(), state, false).await?;
+    Ok(next)
+}
+
+async fn apply_config(
+    new_config: AppConfig,
+    state: State<'_, AppState>,
+    notify_saved: bool,
+) -> CmdResult<()> {
     persist_config(&new_config, &state.config_path).map_err(|e| e.to_string())?;
 
     // Snapshot the *previous* capture-relevant fields before we overwrite,
@@ -121,7 +171,7 @@ pub async fn update_config(new_config: AppConfig, state: State<'_, AppState>) ->
         let _ = state
             .notify_bus
             .send(Notification::info("Capture restarted").body(body));
-    } else {
+    } else if notify_saved {
         let _ = state.notify_bus.send(
             Notification::success("Config saved")
                 .body("Restart affected subsystems for changes to take effect."),
@@ -296,6 +346,7 @@ pub async fn set_active_bot(
             ));
         }
     }
+    let _save = state.config_update_lock.lock().await;
     {
         let mut cfg = state.config.write().await;
         match mode.as_str() {
@@ -1566,6 +1617,18 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    #[test]
+    fn full_save_preserves_live_autoplay_controls() {
+        let mut draft = AppConfig::default();
+        draft.autoplay.majsoul.click_hold_ms = 175;
+        let mut current = AppConfig::default();
+        current.autoplay.enabled = true;
+        current.autoplay.majsoul.total_games = 4;
+        preserve_autoplay_controls(&mut draft, &current);
+        assert!(draft.autoplay.enabled);
+        assert_eq!(draft.autoplay.majsoul.total_games, 4);
+        assert_eq!(draft.autoplay.majsoul.click_hold_ms, 175);
+    }
     /// Only `http(s)://` may reach the OS opener — anything else could be
     /// abused as a generic process/file launcher. (That a query-string URL
     /// reaches the *browser* — not explorer.exe's Documents fallback — is

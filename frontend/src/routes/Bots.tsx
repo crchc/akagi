@@ -680,8 +680,8 @@ function NativeApiSettings() {
       // only applies to them, so leaving an author bot active would persist
       // an enabled API that nothing uses.
       const { next, switched } = withNativeBotForApi(config, draft)
-      await invoke('update_config', { newConfig: next })
-      setConfig(next)
+      const saved = await invoke<AppConfig>('update_config_preserving_controls', { newConfig: next })
+      setConfig(saved)
       toast.success(t('bots.api.saved'))
       if (switched) toast.info(t('bots.api.native_selected'))
       return true

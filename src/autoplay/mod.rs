@@ -63,6 +63,7 @@ pub mod context;
 pub mod delay;
 pub mod inject;
 pub mod majsoul;
+mod majsoul_rematch;
 pub mod manager;
 pub mod platform;
 pub mod riichi_city;
