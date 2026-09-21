@@ -102,7 +102,7 @@ https://github.com/user-attachments/assets/d5bc6ff6-6560-4365-ae55-660c9a522790
 - [mjai Bots (plugin interface)](#mjai-bots-plugin-interface)
 - [Build From Source](#build-from-source)
 - [Testing](#testing)
-- [Releases &amp; CI](#releases--ci)
+- [Build Artifacts](#build-artifacts)
 - [Reference Materials](#reference-materials)
 - [License &amp; Attribution](#license--attribution)
 - [Acknowledgements](#acknowledgements)
@@ -598,11 +598,11 @@ cargo test               # all tests, incl. integration
 cargo test --release     # for the perf bench
 ```
 
-## Builds & CI
+## Build Artifacts
 
 GitHub Actions [`build.yml`](./.github/workflows/build.yml) builds every push
-to `main`, or a manual dispatch on `main`. One portable zip is uploaded as an
-Actions artifact per target:
+to `main`, or a manual dispatch on `main`. Each target uploads its portable
+zip directly, so the downloaded artifact needs only one unzip:
 
 | OS runner | Target | Artifact |
 |---|---|---|

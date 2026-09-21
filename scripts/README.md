@@ -16,11 +16,11 @@ scripts/fetch-runtime.sh x86_64-pc-windows-msvc  # cross-target
 ```
 
 Versions come from env vars (`PYTHON_VERSION`, `PBS_RELEASE`,
-`UV_VERSION`) with built-in defaults. CI sets them via the `env:` block
+`UV_VERSION`) with built-in defaults. The build workflow sets them via the `env:` block
 at the top of `.github/workflows/build.yml`.
 
 The `runtime/` tree is gitignored. Each per-triple subtree caches under
-the same key in CI (`Cache bundled runtime` step), so a second run on
+the same key in the build workflow (`Cache bundled runtime` step), so a second run on
 the same target hits the cache and skips network entirely.
 
 ## `package-zip.sh`
@@ -78,9 +78,9 @@ instead of downloading:
 python scripts/extract_liqi.py --from-raw <dir-with-lua-and-proto_config>
 ```
 
-## CI integration
+## Build workflow
 
 `.github/workflows/build.yml` ties `fetch-runtime.sh` and
 `package-zip.sh` together: fetch → `cargo build --release` →
-package → upload `dist/*.zip`. One zip per target (linux-x64,
+package → upload `dist/*.zip` as-is (`archive: false`). One zip per target (linux-x64,
 macos-arm64, windows-x64).

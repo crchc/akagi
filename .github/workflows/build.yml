@@ -83,9 +83,9 @@ jobs:
         run: bash scripts/package-zip.sh "${{ matrix.target }}"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: akagi-${{ matrix.target }}
           path: dist/*.zip
+          archive: false
           if-no-files-found: error
           retention-days: 14

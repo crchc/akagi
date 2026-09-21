@@ -98,7 +98,7 @@ https://github.com/user-attachments/assets/2ce7cb71-8b25-4895-a12b-0a638665dcab
 - [mjai Bot 插件接口](#mjai-bot-插件接口)
 - [从源码构建](#从源码构建)
 - [测试](#测试)
-- [Releases 与 CI](#releases-与-ci)
+- [构建产物](#构建产物)
 - [参考资料](#参考资料)
 - [许可与致谢](#许可与致谢)
 - [鸣谢](#鸣谢)
@@ -598,11 +598,11 @@ cargo test               # 所有测试（含集成测试）
 cargo test --release     # 用于性能 bench
 ```
 
-## 构建与 CI
+## 构建产物
 
 GitHub Actions [`build.yml`](./.github/workflows/build.yml)
 会在每次推送到 `main` 时构建，也可以在 `main` 上手动触发。每个目标
-会上传一个 portable zip 作为 Actions 产物：
+直接上传 portable zip，下载后只需解压一次：
 
 | OS runner | 目标 | 产出文件 |
 |---|---|---|
