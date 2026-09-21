@@ -90,6 +90,8 @@ async fn run_async() -> anyhow::Result<()> {
     );
     ipc::install(state.clone());
 
+    tokio::spawn(autoplay::majsoul_rematch::watch(state.clone()));
+
     tokio::spawn(game_state::tracker::drive_loop(
         game_tracker.clone(),
         mjai_bus.subscribe(),

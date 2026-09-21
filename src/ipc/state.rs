@@ -8,8 +8,8 @@ use crate::autoplay::AutoplayContext;
 use crate::bot::PythonRuntime;
 use crate::config::AppConfig;
 use crate::event_bus::{
-    AnalysisBus, BotResponseBus, BotStatusBus, CaptureStatusBus, HistoryBus, MjaiBus, NotifyBus,
-    PostTrackerBus,
+    AnalysisBus, BotResponseBus, BotStatusBus, CaptureStatusBus, ConfigBus, HistoryBus, MjaiBus,
+    NotifyBus, PostTrackerBus,
 };
 use crate::game_state::GameTracker;
 use crate::history::recorder::SharedPlatform;
@@ -65,6 +65,7 @@ pub struct AppState {
     pub bot_status_bus: BotStatusBus,
     pub capture_status_bus: CaptureStatusBus,
     pub notify_bus: NotifyBus,
+    pub config_bus: ConfigBus,
     pub analysis_bus: AnalysisBus,
     pub history_bus: HistoryBus,
 
@@ -154,6 +155,7 @@ impl AppState {
             bot_status_bus,
             capture_status_bus,
             notify_bus,
+            config_bus: crate::event_bus::config_bus(),
             analysis_bus,
             history_bus,
             bot_status: Arc::new(RwLock::new(BotStatus::Idle)),

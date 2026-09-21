@@ -15,7 +15,7 @@ use tracing::{info, warn};
 use crate::autoplay::cdp_input::{dispatch_click, evaluate_canvas_rect};
 use crate::autoplay::context::{AutoplayContext, CanvasRect};
 use crate::config::{AppConfig, Platform};
-use crate::event_bus::MjaiBus;
+use crate::ipc::{commands::complete_majsoul_game, AppState};
 use crate::schema::{GameEndReason, MjaiEvent};
 
 const REFERENCE_WIDTH: f64 = 1533.0;
@@ -42,35 +42,62 @@ impl Screen {
     }
 }
 
-/// Observe complete games in this process. The first observed StartGame is
-/// game 1; a new run resets the count. Terminations do not count as games.
-pub async fn watch(cfg: Arc<RwLock<AppConfig>>, ctx: Arc<AutoplayContext>, bus: MjaiBus) {
-    let mut rx = bus.subscribe();
+/// Count each confirmed game once, then advance if another game remains.
+pub async fn watch(state: AppState) {
+    let mut rx = state.mjai_bus.subscribe();
+    let mut config_rx = state.config_bus.subscribe();
     let mut in_game = false;
-    let mut completed = 0_u32;
+    let mut result_pending = false;
     loop {
-        match rx.recv().await {
-            Ok(MjaiEvent::StartGame { .. }) => in_game = true,
+        tokio::select! {
+        event = rx.recv() => match event {
+            Ok(MjaiEvent::StartGame { .. }) => {
+                in_game = true;
+                result_pending = false;
+            }
             Ok(MjaiEvent::EndGame {
                 reason: GameEndReason::Confirmed,
                 ..
             }) if in_game => {
                 in_game = false;
-                completed = completed.saturating_add(1);
-                let guard = cfg.read().await;
-                let total = guard.autoplay.majsoul.total_games.max(1);
-                let enabled = guard.autoplay.enabled && guard.platform.kind == Platform::Majsoul;
+                let remaining = match complete_majsoul_game(&state).await {
+                    Ok(value) => value,
+                    Err(e) => {
+                        warn!("autoplay: failed to save remaining games: {e}");
+                        continue;
+                    }
+                };
+                let guard = state.config.read().await;
+                let majsoul = guard.platform.kind == Platform::Majsoul;
+                let enabled = guard.autoplay.enabled && majsoul;
                 drop(guard);
-                info!(completed, total, "autoplay: Mahjong Soul game completed");
-                if enabled && completed < total {
-                    if let Err(e) = advance(&cfg, &ctx, &mut rx, &mut in_game, completed).await {
+                info!(remaining, "autoplay: Mahjong Soul game completed");
+                result_pending = majsoul && (!enabled || remaining == 0);
+                if enabled && remaining > 0 {
+                    if let Err(e) = advance(&state.config, &state.autoplay_context, &mut rx, &mut in_game).await {
                         warn!("autoplay: rematch flow stopped: {e:#}");
                     }
                 }
             }
-            Ok(MjaiEvent::EndGame { .. }) => in_game = false,
+            Ok(MjaiEvent::EndGame { .. }) => {
+                in_game = false;
+                result_pending = false;
+            }
             Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
             Err(broadcast::error::RecvError::Closed) => return,
+        },
+        update = config_rx.recv() => if let Ok(config) = update {
+            if result_pending
+                && config.autoplay.enabled
+                && config.platform.kind == Platform::Majsoul
+                && config.autoplay.majsoul.remaining_games > 0
+            {
+                result_pending = false;
+                if let Err(e) = advance(&state.config, &state.autoplay_context, &mut rx, &mut in_game).await {
+                    warn!("autoplay: rematch flow stopped: {e:#}");
+                }
+            }
+        },
         }
     }
 }
@@ -80,7 +107,6 @@ async fn advance(
     ctx: &Arc<AutoplayContext>,
     rx: &mut broadcast::Receiver<MjaiEvent>,
     in_game: &mut bool,
-    completed: u32,
 ) -> anyhow::Result<()> {
     let page = ctx
         .page
@@ -93,15 +119,8 @@ async fn advance(
     // The first two result screens use the same gold confirmation button.
     // If a user already passed either screen, the next visible stage wins.
     for _ in 0..2 {
-        let (screen, rect) = wait_for(
-            &page,
-            cfg,
-            rx,
-            in_game,
-            completed,
-            &[Screen::Confirm, Screen::Rematch],
-        )
-        .await?;
+        let (screen, rect) =
+            wait_for(&page, cfg, rx, in_game, &[Screen::Confirm, Screen::Rematch]).await?;
         if screen == Screen::Rematch {
             break;
         }
@@ -109,19 +128,12 @@ async fn advance(
         tokio::time::sleep(Duration::from_millis(1500)).await;
     }
 
-    let (screen, rect) = wait_for(
-        &page,
-        cfg,
-        rx,
-        in_game,
-        completed,
-        &[Screen::Rematch, Screen::Dialog],
-    )
-    .await?;
+    let (screen, rect) =
+        wait_for(&page, cfg, rx, in_game, &[Screen::Rematch, Screen::Dialog]).await?;
     if screen == Screen::Rematch {
         press(&page, rect, Screen::Rematch, cfg).await?;
     }
-    let (_, rect) = wait_for(&page, cfg, rx, in_game, completed, &[Screen::Dialog]).await?;
+    let (_, rect) = wait_for(&page, cfg, rx, in_game, &[Screen::Dialog]).await?;
     press(&page, rect, Screen::Dialog, cfg).await?;
     info!("autoplay: rematch dialog confirmation clicked");
     Ok(())
@@ -132,7 +144,6 @@ async fn wait_for(
     cfg: &Arc<RwLock<AppConfig>>,
     rx: &mut broadcast::Receiver<MjaiEvent>,
     in_game: &mut bool,
-    completed: u32,
     wanted: &[Screen],
 ) -> anyhow::Result<(Screen, CanvasRect)> {
     let deadline = Instant::now() + STEP_TIMEOUT;
@@ -155,7 +166,7 @@ async fn wait_for(
         let guard = cfg.read().await;
         let active = guard.autoplay.enabled
             && guard.platform.kind == Platform::Majsoul
-            && completed < guard.autoplay.majsoul.total_games.max(1);
+            && guard.autoplay.majsoul.remaining_games > 0;
         drop(guard);
         if !active {
             anyhow::bail!("rematch disabled in settings");

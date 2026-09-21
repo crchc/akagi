@@ -31,7 +31,7 @@ function eventSource(): EventSource {
   source = new EventSource('/api/events')
   const names = [
     'mjai-event', 'bot-response', 'bot-status', 'capture-status', 'notify',
-    'analysis-result', 'history-recorded', 'log-entry', 'inspector-entry',
+    'analysis-result', 'history-recorded', 'log-entry', 'inspector-entry', 'config-updated',
   ]
   for (const name of names) {
     source.addEventListener(name, (event) => {

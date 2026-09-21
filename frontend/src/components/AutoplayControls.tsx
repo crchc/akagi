@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { invoke } from '@/lib/api'
@@ -24,9 +24,16 @@ export function AutoplayControls() {
   const [warningOpen, setWarningOpen] = useState(false)
   const pending = useRef<Promise<unknown>>(Promise.resolve())
   const pendingCount = useRef(0)
-  const totalInput = useRef<HTMLInputElement>(null)
+  const remainingInput = useRef<HTMLInputElement>(null)
+  const edited = useRef(false)
 
-  const total = config?.autoplay.majsoul.total_games ?? 1
+  const remaining = config?.autoplay.majsoul.remaining_games ?? 1
+
+  useEffect(() => {
+    if (remainingInput.current && document.activeElement !== remainingInput.current) {
+      remainingInput.current.value = String(remaining)
+    }
+  }, [remaining])
 
   if (!config) return null
 
@@ -35,14 +42,17 @@ export function AutoplayControls() {
   const isRiichiCity = config.platform.kind === 'RiichiCity'
   const canEnable = isRiichiCity || config.capture.mode === 'chromium'
 
-  const save = (patch: { enabled?: boolean; total_games?: number }) => {
+  const save = (patch: { enabled?: boolean; remaining_games?: number }) => {
+    const before = useConfigStore.getState().config
     pendingCount.current += 1
     setBusy(true)
     const task = pending.current.then(() => invoke<AppConfig>('update_autoplay_controls', patch))
     pending.current = task.then(() => undefined, () => undefined)
-    void task.then(setConfig).catch((error: unknown) => {
-      if (totalInput.current) {
-        totalInput.current.value = String(useConfigStore.getState().config?.autoplay.majsoul.total_games ?? 1)
+    void task.then((saved) => {
+      if (useConfigStore.getState().config === before) setConfig(saved)
+    }).catch((error: unknown) => {
+      if (remainingInput.current) {
+        remainingInput.current.value = String(useConfigStore.getState().config?.autoplay.majsoul.remaining_games ?? 1)
       }
       toast.error(String(error))
     }).finally(() => {
@@ -51,15 +61,15 @@ export function AutoplayControls() {
     })
   }
 
-  const commitTotal = () => {
-    const input = totalInput.current
+  const commitRemaining = () => {
+    const input = remainingInput.current
     if (!input) return
     const value = Number(input.value)
-    if (!Number.isSafeInteger(value) || value < 1) {
-      input.value = String(total)
+    if (input.value.trim() === '' || !Number.isSafeInteger(value) || value < 0) {
+      input.value = String(remaining)
       return
     }
-    if (value !== total) save({ total_games: value })
+    if (value !== remaining) save({ remaining_games: value })
   }
 
   return (
@@ -79,19 +89,24 @@ export function AutoplayControls() {
         />
       </label>
       {isMajsoul && (
-        <label className="flex items-center gap-2 whitespace-nowrap" title={t('settings.autoplay.total_games_hint')}>
-          <span>{t('settings.autoplay.total_games')}</span>
+        <label className="flex items-center gap-2 whitespace-nowrap" title={t('settings.autoplay.remaining_games_hint')}>
+          <span>{t('settings.autoplay.remaining_games')}</span>
           <Input
-            key={total}
-            ref={totalInput}
+            ref={remainingInput}
             type="number"
-            min={1}
+            min={0}
             step={1}
             inputMode="numeric"
             className="w-16"
-            defaultValue={total}
+            defaultValue={remaining}
             disabled={busy}
-            onBlur={commitTotal}
+            onFocus={() => { edited.current = false }}
+            onChange={() => { edited.current = true }}
+            onBlur={() => {
+              if (edited.current) commitRemaining()
+              else if (remainingInput.current) remainingInput.current.value = String(remaining)
+              edited.current = false
+            }}
             onKeyDown={(event) => {
               if (event.key === 'Enter') event.currentTarget.blur()
             }}

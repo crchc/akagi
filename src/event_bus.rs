@@ -3,6 +3,7 @@
 
 use crate::analysis::result::AnalysisResult;
 use crate::bot::BotResponse;
+use crate::config::AppConfig;
 use crate::schema::{BotStatus, CaptureStatus, HistoryEvent, MjaiEvent, Notification};
 use tokio::sync::broadcast;
 
@@ -20,6 +21,9 @@ pub type CaptureStatusBus = broadcast::Sender<CaptureStatus>;
 
 /// Fan-out for transient `Notification`s pushed at the user.
 pub type NotifyBus = broadcast::Sender<Notification>;
+
+/// Fan-out for saved configuration changes, including the live game count.
+pub type ConfigBus = broadcast::Sender<AppConfig>;
 
 /// Fan-out for `AnalysisResult`s produced after each game-state update.
 pub type AnalysisBus = broadcast::Sender<AnalysisResult>;
@@ -92,6 +96,11 @@ pub fn capture_status_bus() -> CaptureStatusBus {
 }
 
 pub fn notify_bus() -> NotifyBus {
+    let (tx, _rx) = broadcast::channel(STATUS_CAPACITY);
+    tx
+}
+
+pub fn config_bus() -> ConfigBus {
     let (tx, _rx) = broadcast::channel(STATUS_CAPACITY);
     tx
 }

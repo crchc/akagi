@@ -97,28 +97,42 @@ pub async fn update_config_preserving_controls(
 
 fn preserve_autoplay_controls(draft: &mut AppConfig, current: &AppConfig) {
     draft.autoplay.enabled = current.autoplay.enabled;
-    draft.autoplay.majsoul.total_games = current.autoplay.majsoul.total_games;
+    draft.autoplay.majsoul.remaining_games = current.autoplay.majsoul.remaining_games;
 }
 
 /// Update only the controls exposed in the persistent status bar.
 pub async fn update_autoplay_controls(
     enabled: Option<bool>,
-    total_games: Option<u32>,
+    remaining_games: Option<u32>,
     state: State<'_, AppState>,
 ) -> CmdResult<AppConfig> {
-    if total_games == Some(0) {
-        return Err("total_games must be at least 1".into());
-    }
     let _save = state.config_update_lock.lock().await;
     let mut next = state.config.read().await.clone();
     if let Some(value) = enabled {
         next.autoplay.enabled = value;
     }
-    if let Some(value) = total_games {
-        next.autoplay.majsoul.total_games = value;
+    if let Some(value) = remaining_games {
+        next.autoplay.majsoul.remaining_games = value;
     }
     apply_config(next.clone(), state, false).await?;
     Ok(next)
+}
+
+/// Count one confirmed Mahjong Soul game. The shared save lock makes a
+/// simultaneous status-bar edit win or lose atomically, never overwrite it.
+pub(crate) async fn complete_majsoul_game(state: &AppState) -> CmdResult<u32> {
+    let _save = state.config_update_lock.lock().await;
+    let mut next = state.config.read().await.clone();
+    if next.platform.kind != crate::config::Platform::Majsoul {
+        return Ok(next.autoplay.majsoul.remaining_games);
+    }
+    let remaining = next.autoplay.majsoul.remaining_games;
+    if remaining == 0 {
+        return Ok(0);
+    }
+    next.autoplay.majsoul.remaining_games = remaining - 1;
+    apply_config(next, state, false).await?;
+    Ok(remaining - 1)
 }
 
 async fn apply_config(
@@ -140,7 +154,8 @@ async fn apply_config(
     let new_platform = new_config.platform.kind;
     let bot_now_enabled = new_config.bot.enabled;
     let autoplay_now_enabled = new_config.autoplay.enabled;
-    *state.config.write().await = new_config;
+    *state.config.write().await = new_config.clone();
+    let _ = state.config_bus.send(new_config);
 
     // Sync the history recorder's platform tag immediately. Subsequent
     // finalised games are stamped with the new tag; the in-flight buffer
@@ -1623,10 +1638,10 @@ mod tests {
         draft.autoplay.majsoul.click_hold_ms = 175;
         let mut current = AppConfig::default();
         current.autoplay.enabled = true;
-        current.autoplay.majsoul.total_games = 4;
+        current.autoplay.majsoul.remaining_games = 4;
         preserve_autoplay_controls(&mut draft, &current);
         assert!(draft.autoplay.enabled);
-        assert_eq!(draft.autoplay.majsoul.total_games, 4);
+        assert_eq!(draft.autoplay.majsoul.remaining_games, 4);
         assert_eq!(draft.autoplay.majsoul.click_hold_ms, 175);
     }
     /// Only `http(s)://` may reach the OS opener — anything else could be

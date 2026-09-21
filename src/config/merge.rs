@@ -43,6 +43,14 @@ pub fn merge_into<T: serde::Serialize>(config: &T, existing: &str) -> Result<Str
     merge_table(doc.as_table_mut(), fresh.as_table(), &mut Vec::new());
     // Remove the retired desktop overlay from existing configs.
     doc.remove("overlay");
+    if let Some(majsoul) = doc
+        .get_mut("autoplay")
+        .and_then(Item::as_table_mut)
+        .and_then(|autoplay| autoplay.get_mut("majsoul"))
+        .and_then(Item::as_table_mut)
+    {
+        majsoul.remove("total_games");
+    }
     Ok(doc.to_string())
 }
 
@@ -144,6 +152,18 @@ mod tests {
                 name: "new".to_string(),
             },
         }
+    }
+
+    #[test]
+    fn retired_total_games_is_removed_on_save() {
+        let mut config = AppConfig::default();
+        config.autoplay.majsoul.remaining_games = 2;
+        let existing = "[autoplay.majsoul]\ntotal_games = 3\n";
+        let out = merge_into(&config, existing).unwrap();
+        assert!(out.contains("remaining_games = 2"), "{out}");
+        assert!(!out.contains("total_games"), "{out}");
+        let loaded: AppConfig = toml::from_str(&out).unwrap();
+        assert_eq!(loaded.autoplay.majsoul.remaining_games, 2);
     }
 
     /// A whole section this build never declared stays in the file, while our

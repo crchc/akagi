@@ -88,7 +88,7 @@ export function Settings() {
           enabled: stored.autoplay.enabled,
           majsoul: {
             ...prev.autoplay.majsoul,
-            total_games: stored.autoplay.majsoul.total_games,
+            remaining_games: stored.autoplay.majsoul.remaining_games,
           },
         },
       }
@@ -125,10 +125,12 @@ export function Settings() {
   const save = async () => {
     setSaving(true)
     setErr(null)
+    const before = useConfigStore.getState().config
     try {
       const saved = await invoke<AppConfig>('update_config_preserving_controls', { newConfig: draft })
-      setDraft(saved)
-      setStored(saved)
+      const current = useConfigStore.getState().config
+      if (current === before) setStored(saved)
+      setDraft(current && current !== before ? current : saved)
     } catch (e) {
       setErr(String(e))
     } finally {
@@ -139,10 +141,12 @@ export function Settings() {
   const saveAndLeave = async () => {
     setSaving(true)
     setErr(null)
+    const before = useConfigStore.getState().config
     try {
       const saved = await invoke<AppConfig>('update_config_preserving_controls', { newConfig: draft })
-      setDraft(saved)
-      setStored(saved)
+      const current = useConfigStore.getState().config
+      if (current === before) setStored(saved)
+      setDraft(current && current !== before ? current : saved)
       blocker.proceed?.()
     } catch (e) {
       setErr(String(e))
@@ -756,7 +760,7 @@ function AutoplayCard({
   const ap = draft.autoplay ?? {
     enabled: false,
     majsoul: {
-      total_games: 1,
+      remaining_games: 1,
       pre_click_delay_min_ms: 1000,
       pre_click_delay_max_ms: 3000,
       inter_click_delay_ms: 300,

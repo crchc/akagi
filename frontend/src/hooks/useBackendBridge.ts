@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { invoke, listen } from '@/lib/api'
-import type { AnalysisResult, BotResponse, BotStatus, CaptureStatus, GameRecord, GameStateSnapshot, HistoryEvent, MahgenView, MjaiEvent, Notification, Snapshot } from '@/types'
+import type { AnalysisResult, AppConfig, BotResponse, BotStatus, CaptureStatus, GameRecord, GameStateSnapshot, HistoryEvent, MahgenView, MjaiEvent, Notification, Snapshot } from '@/types'
 import { useGameStore } from '@/stores/gameStore'
 import { useAnalysisStore } from '@/stores/analysisStore'
 import { useBotStore } from '@/stores/botStore'
@@ -51,6 +51,7 @@ export function useBackendBridge() {
       void refreshGame()
     }).then((u) => unlistens.push(u))
     listen<AnalysisResult>('analysis-result', (v) => useAnalysisStore.getState().set(v)).then((u) => unlistens.push(u))
+    listen<AppConfig>('config-updated', (v) => useConfigStore.getState().setConfig(v)).then((u) => unlistens.push(u))
     listen<BotStatus>('bot-status', (v) => useBotStore.getState().setStatus(v)).then((u) => unlistens.push(u))
     listen<CaptureStatus>('capture-status', (v) => useCaptureStore.getState().set(v)).then((u) => unlistens.push(u))
     listen<BotResponse>('bot-response', (v) => useNotifyStore.getState().pushResponse(v)).then((u) => unlistens.push(u))

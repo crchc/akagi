@@ -227,8 +227,8 @@ async fn invoke(
             }
         }
         "update_autoplay_controls" => {
-            opt_args!(body, enabled: bool, total_games: u32);
-            answer(commands::update_autoplay_controls(enabled, total_games, &state).await)
+            opt_args!(body, enabled: bool, remaining_games: u32);
+            answer(commands::update_autoplay_controls(enabled, remaining_games, &state).await)
         }
         "list_bots" => answer(commands::list_bots(&state).await),
         "get_bot_settings" => {
@@ -437,6 +437,7 @@ async fn events(
     let mut bots = state.bot_status_bus.subscribe();
     let mut capture = state.capture_status_bus.subscribe();
     let mut notify = state.notify_bus.subscribe();
+    let mut config = state.config_bus.subscribe();
     let mut analysis = state.analysis_bus.subscribe();
     let mut history = state.history_bus.subscribe();
     let mut logs = state.log_session.subscribe();
@@ -449,6 +450,7 @@ async fn events(
                 Ok(v) = bots.recv() => event("bot-status", &v),
                 Ok(v) = capture.recv() => event("capture-status", &v),
                 Ok(v) = notify.recv() => event("notify", &v),
+                Ok(v) = config.recv() => event("config-updated", &v),
                 Ok(v) = analysis.recv() => event("analysis-result", &v),
                 Ok(v) = history.recv() => event("history-recorded", &v),
                 Ok(v) = logs.recv() => event("log-entry", &v),
