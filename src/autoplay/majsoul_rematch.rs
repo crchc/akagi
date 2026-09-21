@@ -1,18 +1,17 @@
 //! Advance Mahjong Soul's end-of-game screens and request the next match.
-//! A confirmed protocol game end starts the flow; every press is gated by
-//! pixels from the live canvas so animation delays and manual clicks do not
-//! turn the recorded coordinates into blind presses.
+//! A confirmed protocol game end starts a bounded result-screen loop. Full
+//! viewport screenshots detect the rematch and matchmaking buttons; repeated
+//! presses at the result confirmation point also dismiss reward screens.
 
 use std::io::Cursor;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use chromiumoxide::cdp::browser_protocol::page::Viewport;
 use chromiumoxide::page::{Page, ScreenshotParams};
 use tokio::sync::{broadcast, RwLock};
 use tracing::{info, warn};
 
-use crate::autoplay::cdp_input::{dispatch_click, evaluate_canvas_rect};
+use crate::autoplay::cdp_input::dispatch_click;
 use crate::autoplay::context::{AutoplayContext, CanvasRect};
 use crate::config::{AppConfig, Platform};
 use crate::ipc::{commands::complete_majsoul_game, AppState};
@@ -21,24 +20,47 @@ use crate::schema::{GameEndReason, MjaiEvent};
 const REFERENCE_WIDTH: f64 = 1533.0;
 const REFERENCE_HEIGHT: f64 = 861.0;
 const POLL: Duration = Duration::from_millis(600);
-const STEP_TIMEOUT: Duration = Duration::from_secs(45);
+const AFTER_CLICK: Duration = Duration::from_millis(1500);
+const FLOW_TIMEOUT: Duration = Duration::from_secs(75);
+const MAX_CLICKS: u32 = 20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Screen {
-    Confirm,
     Rematch,
     Dialog,
     Other,
 }
 
-impl Screen {
-    fn point(self) -> Option<(f64, f64)> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Phase {
+    Results,
+    MatchDialog,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Action {
+    Confirm,
+    Rematch,
+    Dialog,
+}
+
+impl Action {
+    fn point(self) -> (f64, f64) {
         match self {
-            Self::Confirm => Some((1390.0, 780.0)),
-            Self::Rematch => Some((1165.0, 788.0)),
-            Self::Dialog => Some((624.0, 634.0)),
-            Self::Other => None,
+            Self::Confirm => (1390.0, 780.0),
+            Self::Rematch => (1165.0, 788.0),
+            Self::Dialog => (624.0, 634.0),
         }
+    }
+}
+
+fn choose_action(phase: Phase, screen: Screen) -> Action {
+    match (phase, screen) {
+        (Phase::Results, Screen::Rematch) => Action::Rematch,
+        (Phase::Results, _) => Action::Confirm,
+        (Phase::MatchDialog, Screen::Dialog) => Action::Dialog,
+        (Phase::MatchDialog, Screen::Rematch) => Action::Rematch,
+        (Phase::MatchDialog, Screen::Other) => Action::Confirm,
     }
 }
 
@@ -116,38 +138,10 @@ async fn advance(
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("no Chromium page handle"))?;
 
-    // The first two result screens use the same gold confirmation button.
-    // If a user already passed either screen, the next visible stage wins.
-    for _ in 0..2 {
-        let (screen, rect) =
-            wait_for(&page, cfg, rx, in_game, &[Screen::Confirm, Screen::Rematch]).await?;
-        if screen == Screen::Rematch {
-            break;
-        }
-        press(&page, rect, screen, cfg).await?;
-        tokio::time::sleep(Duration::from_millis(1500)).await;
-    }
-
-    let (screen, rect) =
-        wait_for(&page, cfg, rx, in_game, &[Screen::Rematch, Screen::Dialog]).await?;
-    if screen == Screen::Rematch {
-        press(&page, rect, Screen::Rematch, cfg).await?;
-    }
-    let (_, rect) = wait_for(&page, cfg, rx, in_game, &[Screen::Dialog]).await?;
-    press(&page, rect, Screen::Dialog, cfg).await?;
-    info!("autoplay: rematch dialog confirmation clicked");
-    Ok(())
-}
-
-async fn wait_for(
-    page: &Page,
-    cfg: &Arc<RwLock<AppConfig>>,
-    rx: &mut broadcast::Receiver<MjaiEvent>,
-    in_game: &mut bool,
-    wanted: &[Screen],
-) -> anyhow::Result<(Screen, CanvasRect)> {
-    let deadline = Instant::now() + STEP_TIMEOUT;
-    while Instant::now() < deadline {
+    let deadline = Instant::now() + FLOW_TIMEOUT;
+    let mut phase = Phase::Results;
+    let mut clicks = 0;
+    while Instant::now() < deadline && clicks < MAX_CLICKS {
         // A manually started game makes all pending result-screen clicks stale.
         loop {
             match rx.try_recv() {
@@ -171,31 +165,33 @@ async fn wait_for(
         if !active {
             anyhow::bail!("rematch disabled in settings");
         }
-        if let Ok(rect) = evaluate_canvas_rect(page).await {
-            if rect.width > 0.0 && rect.height > 0.0 {
-                match capture_screen(page, rect).await {
-                    Ok(screen) if wanted.contains(&screen) => return Ok((screen, rect)),
-                    Ok(_) => {}
-                    Err(e) => warn!("autoplay: rematch screenshot failed: {e:#}"),
-                }
+
+        let screen = match capture_screen(&page).await {
+            Ok(screen) => screen,
+            Err(e) => {
+                warn!("autoplay: rematch screenshot failed: {e:#}");
+                tokio::time::sleep(POLL).await;
+                continue;
             }
+        };
+        let action = choose_action(phase, screen);
+        press(&page, action, cfg).await?;
+        clicks += 1;
+        match action {
+            Action::Rematch => phase = Phase::MatchDialog,
+            Action::Dialog => {
+                info!(clicks, "autoplay: rematch dialog confirmation clicked");
+                return Ok(());
+            }
+            Action::Confirm => {}
         }
-        tokio::time::sleep(POLL).await;
+        tokio::time::sleep(AFTER_CLICK).await;
     }
-    anyhow::bail!("timed out waiting for {:?}", wanted)
+    anyhow::bail!("rematch stopped after {clicks} clicks without reaching matchmaking")
 }
 
-async fn capture_screen(page: &Page, rect: CanvasRect) -> anyhow::Result<Screen> {
-    let clip = Viewport {
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-        scale: 1.0,
-    };
-    let bytes = page
-        .screenshot(ScreenshotParams::builder().clip(clip).build())
-        .await?;
+async fn capture_screen(page: &Page) -> anyhow::Result<Screen> {
+    let bytes = page.screenshot(ScreenshotParams::builder().build()).await?;
     classify_png(&bytes)
 }
 
@@ -211,9 +207,10 @@ fn classify_png(bytes: &[u8]) -> anyhow::Result<Screen> {
     ];
     let info = reader.next_frame(&mut data)?;
     let data = &data[..info.buffer_size()];
+    let rect = centered_game_rect(f64::from(info.width), f64::from(info.height))?;
     let sample = |x: f64, y: f64| -> Option<[u8; 3]> {
-        let px = ((x / REFERENCE_WIDTH) * f64::from(info.width)).floor() as usize;
-        let py = ((y / REFERENCE_HEIGHT) * f64::from(info.height)).floor() as usize;
+        let px = (rect.x + x / REFERENCE_WIDTH * rect.width).floor() as usize;
+        let py = (rect.y + y / REFERENCE_HEIGHT * rect.height).floor() as usize;
         if px >= info.width as usize || py >= info.height as usize {
             return None;
         }
@@ -238,22 +235,47 @@ fn classify_pixels(sample: &impl Fn(f64, f64) -> Option<[u8; 3]>) -> Screen {
     };
     if gold(550.0, 634.0) && gold(700.0, 634.0) {
         Screen::Dialog
-    } else if blue(1165.0, 788.0) && gold(1340.0, 780.0) {
+    } else if blue(1165.0, 788.0) {
         Screen::Rematch
-    } else if gold(1340.0, 780.0) && gold(1440.0, 780.0) {
-        Screen::Confirm
     } else {
         Screen::Other
     }
 }
 
-async fn press(
-    page: &Page,
-    rect: CanvasRect,
-    screen: Screen,
-    cfg: &Arc<RwLock<AppConfig>>,
-) -> anyhow::Result<()> {
-    let (x, y) = screen.point().expect("only actionable screens are pressed");
+/// The game fills the largest 1533:861 rectangle centered in the viewport.
+/// Use the same rule for screenshot pixels and CSS click coordinates.
+fn centered_game_rect(width: f64, height: f64) -> anyhow::Result<CanvasRect> {
+    anyhow::ensure!(
+        width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0,
+        "invalid viewport size"
+    );
+    let scale = (width / REFERENCE_WIDTH).min(height / REFERENCE_HEIGHT);
+    let game_width = REFERENCE_WIDTH * scale;
+    let game_height = REFERENCE_HEIGHT * scale;
+    Ok(CanvasRect {
+        x: (width - game_width) / 2.0,
+        y: (height - game_height) / 2.0,
+        width: game_width,
+        height: game_height,
+    })
+}
+
+async fn viewport_rect(page: &Page) -> anyhow::Result<CanvasRect> {
+    let result = page
+        .evaluate("(()=>[window.innerWidth,window.innerHeight])()")
+        .await?;
+    let size: [f64; 2] = serde_json::from_value(
+        result
+            .value()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("viewport size unavailable"))?,
+    )?;
+    centered_game_rect(size[0], size[1])
+}
+
+async fn press(page: &Page, action: Action, cfg: &Arc<RwLock<AppConfig>>) -> anyhow::Result<()> {
+    let rect = viewport_rect(page).await?;
+    let (x, y) = action.point();
     let px = rect.x + x / REFERENCE_WIDTH * rect.width;
     let py = rect.y + y / REFERENCE_HEIGHT * rect.height;
     anyhow::ensure!(rect.contains(px, py), "rematch click outside canvas");
@@ -263,7 +285,7 @@ async fn press(
     let hold = timing.click_hold_ms.max(50);
     drop(guard);
     dispatch_click(page, px, py, hover, hold).await?;
-    info!(?screen, px, py, "autoplay: result-screen click");
+    info!(?action, px, py, "autoplay: result-screen click");
     Ok(())
 }
 
@@ -274,8 +296,6 @@ mod tests {
     #[test]
     fn screenshot_button_signatures_select_each_stage() {
         let samples = [
-            ((1340.0, 780.0), [250, 223, 121]),
-            ((1440.0, 780.0), [247, 224, 118]),
             ((1165.0, 788.0), [49, 77, 135]),
             ((550.0, 634.0), [247, 214, 112]),
             ((700.0, 634.0), [247, 214, 112]),
@@ -285,6 +305,72 @@ mod tests {
         let no_dialog = |x, y| if y == 634.0 { None } else { sample(x, y) };
         assert_eq!(classify_pixels(&no_dialog), Screen::Rematch);
         let no_blue = |x, y| if x == 1165.0 { None } else { no_dialog(x, y) };
-        assert_eq!(classify_pixels(&no_blue), Screen::Confirm);
+        assert_eq!(classify_pixels(&no_blue), Screen::Other);
+    }
+
+    #[test]
+    fn reward_screens_keep_advancing_until_rematch_and_dialog() {
+        assert_eq!(
+            choose_action(Phase::Results, Screen::Other),
+            Action::Confirm
+        );
+        assert_eq!(
+            choose_action(Phase::Results, Screen::Dialog),
+            Action::Confirm
+        );
+        assert_eq!(
+            choose_action(Phase::Results, Screen::Rematch),
+            Action::Rematch
+        );
+        assert_eq!(
+            choose_action(Phase::MatchDialog, Screen::Other),
+            Action::Confirm
+        );
+        assert_eq!(
+            choose_action(Phase::MatchDialog, Screen::Dialog),
+            Action::Dialog
+        );
+    }
+
+    #[test]
+    fn game_rect_is_centered_for_viewports_with_bars() {
+        let same = centered_game_rect(1533.0, 861.0).unwrap();
+        assert_eq!(
+            same,
+            CanvasRect {
+                x: 0.0,
+                y: 0.0,
+                width: 1533.0,
+                height: 861.0
+            }
+        );
+        let wide = centered_game_rect(2000.0, 861.0).unwrap();
+        assert_eq!(wide.y, 0.0);
+        assert!((wide.x - 233.5).abs() < 0.001);
+        let tall = centered_game_rect(1533.0, 1000.0).unwrap();
+        assert_eq!(tall.x, 0.0);
+        assert!((tall.y - 69.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn full_viewport_png_samples_the_centered_game() {
+        let (width, height) = (200_u32, 100_u32);
+        let rect = centered_game_rect(f64::from(width), f64::from(height)).unwrap();
+        let x = (rect.x + 1165.0 / REFERENCE_WIDTH * rect.width).floor() as usize;
+        let y = (rect.y + 788.0 / REFERENCE_HEIGHT * rect.height).floor() as usize;
+        let mut pixels = vec![0_u8; width as usize * height as usize * 3];
+        pixels[(y * width as usize + x) * 3..][..3].copy_from_slice(&[49, 77, 135]);
+        let mut png = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png, width, height);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&pixels)
+                .unwrap();
+        }
+        assert_eq!(classify_png(&png).unwrap(), Screen::Rematch);
     }
 }
