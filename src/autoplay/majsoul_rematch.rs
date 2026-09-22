@@ -1,7 +1,7 @@
 //! Advance Mahjong Soul's end-of-game screens and request the next match.
-//! A confirmed protocol game end starts a bounded result-screen loop. Full
+//! A confirmed protocol game end starts a result-screen loop. Full
 //! viewport screenshots detect result buttons by their color-filled regions;
-//! unrecognized interstitial screens receive a click away from those buttons.
+//! unrecognized interstitial screens receive a click at the Rematch position.
 
 use std::io::Cursor;
 use std::sync::Arc;
@@ -27,9 +27,6 @@ const AFTER_CLICK: Duration = Duration::from_millis(1500);
 const FLOW_TIMEOUT: Duration = Duration::from_secs(75);
 const MAX_CONFIRM_CLICKS: u32 = 2;
 const MAX_REMATCH_CLICKS: u32 = 2;
-// Unknown pages may be reward/rank screens, but repeated clicks on a lobby
-// must not continue indefinitely if recognition or navigation went wrong.
-const MAX_ADVANCE_CLICKS: u32 = 6;
 
 #[derive(Clone, Copy)]
 struct Region {
@@ -96,24 +93,17 @@ impl Action {
             Self::Confirm => Some(CONFIRM.center()),
             Self::Rematch => Some(REMATCH.center()),
             Self::Dialog => Some(DIALOG.center()),
-            Self::Advance => Some((800.0, 500.0)),
+            Self::Advance => Some(REMATCH.center()),
             Self::Wait => None,
         }
     }
 }
 
-fn choose_action(
-    phase: Phase,
-    screen: Screen,
-    confirms: u32,
-    rematches: u32,
-    advances: u32,
-) -> Action {
+fn choose_action(phase: Phase, screen: Screen, confirms: u32, rematches: u32) -> Action {
     match (phase, screen) {
         (Phase::Results, Screen::Rematch) if rematches < MAX_REMATCH_CLICKS => Action::Rematch,
         (Phase::Results, Screen::Confirm) if confirms < MAX_CONFIRM_CLICKS => Action::Confirm,
-        (Phase::Results, _) if advances < MAX_ADVANCE_CLICKS => Action::Advance,
-        (Phase::Results, _) => Action::Wait,
+        (Phase::Results, _) => Action::Advance,
         (Phase::MatchDialog, Screen::Dialog) => Action::Dialog,
         (Phase::MatchDialog, Screen::Rematch) if rematches < MAX_REMATCH_CLICKS => Action::Rematch,
         (Phase::MatchDialog, _) => Action::Wait,
@@ -201,13 +191,17 @@ async fn advance(
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("no Chromium page handle"))?;
 
-    let deadline = Instant::now() + FLOW_TIMEOUT;
+    // The end animation and interstitial screens can outlast a fixed click
+    // budget. Start the timeout only after a result button is actually seen.
+    let mut deadline = None;
     let mut phase = Phase::Results;
     let mut clicks = 0;
     let mut confirms = 0;
     let mut rematches = 0;
-    let mut advances = 0;
-    while Instant::now() < deadline {
+    loop {
+        if deadline.is_some_and(|time| Instant::now() >= time) {
+            anyhow::bail!("rematch stopped after {clicks} clicks without reaching matchmaking");
+        }
         // A manually started game makes all pending result-screen clicks stale.
         loop {
             match rx.try_recv() {
@@ -240,11 +234,8 @@ async fn advance(
                 continue;
             }
         };
-        let action = choose_action(phase, screen, confirms, rematches, advances);
+        let action = choose_action(phase, screen, confirms, rematches);
         if action == Action::Wait {
-            if phase == Phase::Results {
-                anyhow::bail!("result screen still unknown after {advances} advance clicks");
-            }
             tokio::time::sleep(POLL).await;
             continue;
         }
@@ -252,6 +243,7 @@ async fn advance(
         clicks += 1;
         match action {
             Action::Rematch => {
+                deadline.get_or_insert_with(|| Instant::now() + FLOW_TIMEOUT);
                 rematches += 1;
                 phase = Phase::MatchDialog;
             }
@@ -259,13 +251,15 @@ async fn advance(
                 info!(clicks, "autoplay: rematch dialog confirmation clicked");
                 return Ok(());
             }
-            Action::Confirm => confirms += 1,
-            Action::Advance => advances += 1,
+            Action::Confirm => {
+                deadline.get_or_insert_with(|| Instant::now() + FLOW_TIMEOUT);
+                confirms += 1;
+            }
+            Action::Advance => {}
             Action::Wait => {}
         }
         tokio::time::sleep(AFTER_CLICK).await;
     }
-    anyhow::bail!("rematch stopped after {clicks} clicks without reaching matchmaking")
 }
 
 async fn capture_screen(page: &Page) -> anyhow::Result<(Screen, CanvasRect)> {
@@ -341,13 +335,11 @@ fn classify_png(bytes: &[u8], geometry: &Geometry) -> anyhow::Result<Screen> {
     let rematch_blue = coverage(REMATCH, &sample, is_blue)?;
     let dialog_gold = coverage(DIALOG, &sample, is_gold)?;
     let confirm_gold = coverage(CONFIRM, &sample, is_gold)?;
-    tracing::debug!(
-        rematch_blue,
-        dialog_gold,
-        confirm_gold,
-        "autoplay: result button coverage"
-    );
-    Ok(classify_coverage(rematch_blue, dialog_gold, confirm_gold))
+    let screen = classify_coverage(rematch_blue, dialog_gold, confirm_gold);
+    if screen == Screen::Other {
+        info!(rematch_blue, dialog_gold, confirm_gold, canvas = ?geometry.canvas, "autoplay: result screen unrecognized");
+    }
+    Ok(screen)
 }
 
 fn is_gold([r, g, b]: [u8; 3]) -> bool {
@@ -431,32 +423,33 @@ mod tests {
 
     #[test]
     fn unknown_screens_never_repeat_the_confirm_button() {
+        assert_eq!(Action::Advance.point(), Action::Rematch.point());
         assert_eq!(
-            choose_action(Phase::Results, Screen::Confirm, 0, 0, 0),
+            choose_action(Phase::Results, Screen::Confirm, 0, 0),
             Action::Confirm
         );
         assert_eq!(
-            choose_action(Phase::Results, Screen::Confirm, 2, 0, 0),
+            choose_action(Phase::Results, Screen::Confirm, 2, 0),
             Action::Advance
         );
         assert_eq!(
-            choose_action(Phase::Results, Screen::Other, 2, 0, 0),
+            choose_action(Phase::Results, Screen::Other, 2, 0),
             Action::Advance
         );
         assert_eq!(
-            choose_action(Phase::Results, Screen::Other, 2, 0, MAX_ADVANCE_CLICKS),
-            Action::Wait
+            choose_action(Phase::Results, Screen::Other, 2, 2),
+            Action::Advance
         );
         assert_eq!(
-            choose_action(Phase::Results, Screen::Rematch, 2, 0, 0),
+            choose_action(Phase::Results, Screen::Rematch, 2, 0),
             Action::Rematch
         );
         assert_eq!(
-            choose_action(Phase::MatchDialog, Screen::Other, 2, 1, 0),
+            choose_action(Phase::MatchDialog, Screen::Other, 2, 1),
             Action::Wait
         );
         assert_eq!(
-            choose_action(Phase::MatchDialog, Screen::Dialog, 2, 1, 0),
+            choose_action(Phase::MatchDialog, Screen::Dialog, 2, 1),
             Action::Dialog
         );
     }
