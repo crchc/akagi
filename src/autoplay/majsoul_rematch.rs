@@ -24,7 +24,7 @@ const GAME_WIDTH: f64 = 1600.0;
 const GAME_HEIGHT: f64 = 900.0;
 const POLL: Duration = Duration::from_millis(600);
 const AFTER_CLICK: Duration = Duration::from_millis(1500);
-const FLOW_TIMEOUT: Duration = Duration::from_secs(75);
+const FLOW_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_CONFIRM_CLICKS: u32 = 2;
 const MAX_REMATCH_CLICKS: u32 = 2;
 
@@ -101,10 +101,12 @@ impl Action {
 
 fn choose_action(phase: Phase, screen: Screen, confirms: u32, rematches: u32) -> Action {
     match (phase, screen) {
+        // A blind advance click can hit Rematch before its blue region is
+        // recognized, so the dialog must be actionable in either phase.
+        (_, Screen::Dialog) => Action::Dialog,
         (Phase::Results, Screen::Rematch) if rematches < MAX_REMATCH_CLICKS => Action::Rematch,
         (Phase::Results, Screen::Confirm) if confirms < MAX_CONFIRM_CLICKS => Action::Confirm,
         (Phase::Results, _) => Action::Advance,
-        (Phase::MatchDialog, Screen::Dialog) => Action::Dialog,
         (Phase::MatchDialog, Screen::Rematch) if rematches < MAX_REMATCH_CLICKS => Action::Rematch,
         (Phase::MatchDialog, _) => Action::Wait,
     }
@@ -191,17 +193,12 @@ async fn advance(
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("no Chromium page handle"))?;
 
-    // The end animation and interstitial screens can outlast a fixed click
-    // budget. Start the timeout only after a result button is actually seen.
-    let mut deadline = None;
+    let deadline = Instant::now() + FLOW_TIMEOUT;
     let mut phase = Phase::Results;
     let mut clicks = 0;
     let mut confirms = 0;
     let mut rematches = 0;
-    loop {
-        if deadline.is_some_and(|time| Instant::now() >= time) {
-            anyhow::bail!("rematch stopped after {clicks} clicks without reaching matchmaking");
-        }
+    while Instant::now() < deadline {
         // A manually started game makes all pending result-screen clicks stale.
         loop {
             match rx.try_recv() {
@@ -243,7 +240,6 @@ async fn advance(
         clicks += 1;
         match action {
             Action::Rematch => {
-                deadline.get_or_insert_with(|| Instant::now() + FLOW_TIMEOUT);
                 rematches += 1;
                 phase = Phase::MatchDialog;
             }
@@ -252,7 +248,6 @@ async fn advance(
                 return Ok(());
             }
             Action::Confirm => {
-                deadline.get_or_insert_with(|| Instant::now() + FLOW_TIMEOUT);
                 confirms += 1;
             }
             Action::Advance => {}
@@ -260,6 +255,7 @@ async fn advance(
         }
         tokio::time::sleep(AFTER_CLICK).await;
     }
+    anyhow::bail!("rematch stopped after {clicks} clicks without reaching matchmaking")
 }
 
 async fn capture_screen(page: &Page) -> anyhow::Result<(Screen, CanvasRect)> {
@@ -443,6 +439,10 @@ mod tests {
         assert_eq!(
             choose_action(Phase::Results, Screen::Rematch, 2, 0),
             Action::Rematch
+        );
+        assert_eq!(
+            choose_action(Phase::Results, Screen::Dialog, 0, 0),
+            Action::Dialog
         );
         assert_eq!(
             choose_action(Phase::MatchDialog, Screen::Other, 2, 1),
