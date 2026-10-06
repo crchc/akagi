@@ -169,9 +169,16 @@ pub struct MajsoulAutoplayConfig {
     pub pre_click_delay_min_ms: u32,
     /// Upper bound of the random pre-click delay (ms).
     pub pre_click_delay_max_ms: u32,
-    /// Inter-click delay between staged clicks within one action (e.g.
-    /// reach button → riichi tile, or chi button → candidate select).
+    /// Typical gap between staged clicks within one action (e.g. reach
+    /// button → riichi tile, or chi button → candidate select), ms. Each
+    /// gap is drawn uniformly from ±50% around this value.
     pub inter_click_delay_ms: u32,
+    /// How far a click may land from the centre of its target, as a
+    /// percentage of one hand tile's width, on each axis. The point is
+    /// drawn uniformly from `±click_offset_pct%` of a tile width around
+    /// the centre. `0` clicks dead centre; values are capped at 45 so a
+    /// click never leaves the tile it aims at.
+    pub click_offset_pct: u32,
     /// How long to hover the mouse over a target before pressing.
     /// Empirically Laya's input system samples hover state before a
     /// mousedown registers a hit on the tile sprite — clicks issued
@@ -185,7 +192,9 @@ pub struct MajsoulAutoplayConfig {
     /// How long to wait for the client's own uplink command
     /// (`inputOperation` / `inputChiPengGang`) after a click sequence
     /// before treating the click as swallowed and pressing again, ms.
-    /// `0` disables verification entirely.
+    /// `0` disables verification entirely — and with it retries and
+    /// `reload_after_failures`, which count on it. Not shown in the UI;
+    /// `click_retries` is the user-facing knob.
     ///
     /// Checked by polling, so a click that worked costs nothing — only a
     /// genuinely lost one waits this out. Raising it is safer than
@@ -223,7 +232,8 @@ impl Default for MajsoulAutoplayConfig {
             remaining_games: 1,
             pre_click_delay_min_ms: 1000,
             pre_click_delay_max_ms: 3000,
-            inter_click_delay_ms: 300,
+            inter_click_delay_ms: 400,
+            click_offset_pct: 20,
             hover_delay_ms: 200,
             click_hold_ms: 100,
             verify_input_ms: 300,
@@ -231,6 +241,22 @@ impl Default for MajsoulAutoplayConfig {
             reload_after_failures: 3,
             dealer_first_discard_extra_delay_ms: 2000,
         }
+    }
+}
+
+impl MajsoulAutoplayConfig {
+    /// Largest inter-click gap [`Self::sample_inter_click_delay`] can
+    /// produce, ms.
+    pub fn inter_click_delay_max(&self) -> u32 {
+        self.inter_click_delay_ms
+            .saturating_add(self.inter_click_delay_ms / 2)
+    }
+
+    /// Draw one inter-click gap: uniform within ±50% of
+    /// `inter_click_delay_ms`.
+    pub fn sample_inter_click_delay<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> u32 {
+        let lo = self.inter_click_delay_ms - self.inter_click_delay_ms / 2;
+        rng.random_range(lo..=self.inter_click_delay_max())
     }
 }
 
@@ -270,6 +296,20 @@ mod tests {
             toml::from_str("enabled = true\n[majsoul]\nclick_hold_ms = 120\n").unwrap();
         assert_eq!(cfg.majsoul.remaining_games, 1);
         assert_eq!(cfg.majsoul.click_hold_ms, 120);
+    }
+
+    #[test]
+    fn inter_click_delay_samples_within_half_either_side() {
+        let mut c = MajsoulAutoplayConfig::default();
+        c.inter_click_delay_ms = 400;
+        assert_eq!(c.inter_click_delay_max(), 600);
+        let mut rng = rand::rng();
+        for _ in 0..200 {
+            let d = c.sample_inter_click_delay(&mut rng);
+            assert!((200..=600).contains(&d), "{d}");
+        }
+        c.inter_click_delay_ms = 0;
+        assert_eq!(c.sample_inter_click_delay(&mut rng), 0);
     }
 
     #[test]

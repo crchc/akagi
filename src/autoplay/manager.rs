@@ -777,8 +777,8 @@ impl AutoplayManager {
             let jiggle = attempt >= 1;
             for (i, (x_norm, y_norm)) in again.iter().enumerate() {
                 if i > 0 {
-                    tokio::time::sleep(Duration::from_millis(u64::from(cfg.inter_click_delay_ms)))
-                        .await;
+                    let gap = cfg.sample_inter_click_delay(&mut rand::rng());
+                    tokio::time::sleep(Duration::from_millis(u64::from(gap))).await;
                 }
                 let (px, py) = rect.pixel(*x_norm, *y_norm);
                 if !rect.contains(px, py) {
@@ -994,7 +994,7 @@ fn discard_needs_window_guard(action: &MjaiEvent) -> bool {
 /// In a multi-click plan — a chi/pon/kan whose candidate row needs
 /// disambiguating, or a Path-A riichi — the *last* click is both the one
 /// that commits the action and the one most likely to have been swallowed:
-/// it fires `inter_click_delay_ms` after the previous press, while the
+/// it fires one inter-click gap after the previous press, while the
 /// candidate row is still animating in, whereas the opening click follows
 /// the full thinking delay against a settled UI.
 ///

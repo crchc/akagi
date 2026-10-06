@@ -1,11 +1,12 @@
 //! Advance Mahjong Soul's end-of-game screens and request the next match.
-//! A confirmed protocol game end starts a result-screen loop. Full
-//! viewport screenshots detect result buttons by their color-filled regions;
-//! unrecognized interstitial screens receive a click at the Rematch position.
+//! Only a confirmed protocol game end that follows a started game starts the
+//! result-screen loop, which keeps detecting and clicking buttons until the
+//! next game starts. Full viewport screenshots detect result buttons by their
+//! color-filled regions; unrecognized interstitial screens receive a click at
+//! the Rematch position until a match has been requested.
 
 use std::io::Cursor;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use chromiumoxide::page::{Page, ScreenshotParams};
 use serde::Deserialize;
@@ -13,7 +14,7 @@ use tokio::sync::{broadcast, RwLock};
 use tracing::{info, warn};
 
 use crate::autoplay::cdp_input::dispatch_click;
-use crate::autoplay::context::{AutoplayContext, CanvasRect};
+use crate::autoplay::context::CanvasRect;
 use crate::config::{AppConfig, Platform};
 use crate::ipc::{commands::complete_majsoul_game, AppState};
 use crate::schema::{GameEndReason, MjaiEvent};
@@ -24,11 +25,8 @@ const GAME_WIDTH: f64 = 1600.0;
 const GAME_HEIGHT: f64 = 900.0;
 const POLL: Duration = Duration::from_millis(600);
 const AFTER_CLICK: Duration = Duration::from_millis(1500);
-const FLOW_TIMEOUT: Duration = Duration::from_secs(120);
-const MAX_CONFIRM_CLICKS: u32 = 2;
-const MAX_REMATCH_CLICKS: u32 = 2;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Region {
     left: u16,
     top: u16,
@@ -72,44 +70,29 @@ enum Screen {
     Other,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Phase {
-    Results,
-    MatchDialog,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Action {
-    Confirm,
-    Rematch,
-    Dialog,
-    Advance,
-    Wait,
-}
-
-impl Action {
-    fn point(self) -> Option<(f64, f64)> {
-        match self {
-            Self::Confirm => Some(CONFIRM.center()),
-            Self::Rematch => Some(REMATCH.center()),
-            Self::Dialog => Some(DIALOG.center()),
-            Self::Advance => Some(REMATCH.center()),
-            Self::Wait => None,
-        }
-    }
-}
-
-fn choose_action(phase: Phase, screen: Screen, confirms: u32, rematches: u32) -> Action {
-    match (phase, screen) {
+/// The button to click on `screen`, if any. Once a match has been requested,
+/// only recognized match buttons are clicked so nothing lands on the lobby.
+fn target(screen: Screen, requested: bool) -> Option<Region> {
+    match screen {
         // A blind advance click can hit Rematch before its blue region is
-        // recognized, so the dialog must be actionable in either phase.
-        (_, Screen::Dialog) => Action::Dialog,
-        (Phase::Results, Screen::Rematch) if rematches < MAX_REMATCH_CLICKS => Action::Rematch,
-        (Phase::Results, Screen::Confirm) if confirms < MAX_CONFIRM_CLICKS => Action::Confirm,
-        (Phase::Results, _) => Action::Advance,
-        (Phase::MatchDialog, Screen::Rematch) if rematches < MAX_REMATCH_CLICKS => Action::Rematch,
-        (Phase::MatchDialog, _) => Action::Wait,
+        // recognized, so the dialog stays actionable after a request.
+        Screen::Dialog => Some(DIALOG),
+        Screen::Rematch => Some(REMATCH),
+        _ if requested => None,
+        Screen::Confirm => Some(CONFIRM),
+        // Unrecognized interstitials advance at the Rematch position.
+        Screen::Other => Some(REMATCH),
     }
+}
+
+/// The whole flow, including the remaining-games countdown, only runs while
+/// "Enable autoplay" is on.
+fn autoplay_enabled(config: &AppConfig) -> bool {
+    config.autoplay.enabled && config.platform.kind == Platform::Majsoul
+}
+
+fn rematch_enabled(config: &AppConfig) -> bool {
+    autoplay_enabled(config) && config.autoplay.majsoul.remaining_games > 0
 }
 
 #[derive(Deserialize)]
@@ -120,142 +103,102 @@ struct Geometry {
 }
 
 /// Count each confirmed game once, then advance if another game remains.
+/// Only the transition from a started game to its confirmed end triggers the
+/// flow, and only while autoplay is enabled; settings changes while idle on a
+/// result screen do not.
 pub async fn watch(state: AppState) {
     let mut rx = state.mjai_bus.subscribe();
-    let mut config_rx = state.config_bus.subscribe();
     let mut in_game = false;
-    let mut result_pending = false;
     loop {
-        tokio::select! {
-        event = rx.recv() => match event {
-            Ok(MjaiEvent::StartGame { .. }) => {
-                in_game = true;
-                result_pending = false;
-            }
+        match rx.recv().await {
+            Ok(MjaiEvent::StartGame { .. }) => in_game = true,
             Ok(MjaiEvent::EndGame {
                 reason: GameEndReason::Confirmed,
                 ..
             }) if in_game => {
                 in_game = false;
-                let remaining = match complete_majsoul_game(&state).await {
-                    Ok(value) => value,
+                if !autoplay_enabled(&*state.config.read().await) {
+                    continue;
+                }
+                match complete_majsoul_game(&state).await {
+                    Ok(remaining) => info!(remaining, "autoplay: Mahjong Soul game completed"),
                     Err(e) => {
                         warn!("autoplay: failed to save remaining games: {e}");
                         continue;
                     }
-                };
-                let guard = state.config.read().await;
-                let majsoul = guard.platform.kind == Platform::Majsoul;
-                let enabled = guard.autoplay.enabled && majsoul;
-                drop(guard);
-                info!(remaining, "autoplay: Mahjong Soul game completed");
-                result_pending = majsoul && (!enabled || remaining == 0);
-                if enabled && remaining > 0 {
-                    if let Err(e) = advance(&state.config, &state.autoplay_context, &mut rx, &mut in_game).await {
-                        warn!("autoplay: rematch flow stopped: {e:#}");
+                }
+                if rematch_enabled(&*state.config.read().await) {
+                    match advance(&state, &mut rx).await {
+                        Ok(()) => in_game = true,
+                        Err(e) => warn!("autoplay: rematch flow stopped: {e:#}"),
                     }
                 }
             }
-            Ok(MjaiEvent::EndGame { .. }) => {
-                in_game = false;
-                result_pending = false;
-            }
+            Ok(MjaiEvent::EndGame { .. }) => in_game = false,
             Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
             Err(broadcast::error::RecvError::Closed) => return,
-        },
-        update = config_rx.recv() => if let Ok(config) = update {
-            if result_pending
-                && config.autoplay.enabled
-                && config.platform.kind == Platform::Majsoul
-                && config.autoplay.majsoul.remaining_games > 0
-            {
-                result_pending = false;
-                if let Err(e) = advance(&state.config, &state.autoplay_context, &mut rx, &mut in_game).await {
-                    warn!("autoplay: rematch flow stopped: {e:#}");
-                }
-            }
-        },
         }
     }
 }
 
-async fn advance(
-    cfg: &Arc<RwLock<AppConfig>>,
-    ctx: &Arc<AutoplayContext>,
-    rx: &mut broadcast::Receiver<MjaiEvent>,
-    in_game: &mut bool,
-) -> anyhow::Result<()> {
-    let page = ctx
+/// Keep detecting and clicking result-screen buttons until the next game
+/// starts (`Ok`) or rematching is turned off.
+async fn advance(state: &AppState, rx: &mut broadcast::Receiver<MjaiEvent>) -> anyhow::Result<()> {
+    let page = state
+        .autoplay_context
         .page
         .read()
         .await
-        .as_ref()
-        .cloned()
+        .clone()
         .ok_or_else(|| anyhow::anyhow!("no Chromium page handle"))?;
-
-    let deadline = Instant::now() + FLOW_TIMEOUT;
-    let mut phase = Phase::Results;
-    let mut clicks = 0;
-    let mut confirms = 0;
-    let mut rematches = 0;
-    while Instant::now() < deadline {
-        // A manually started game makes all pending result-screen clicks stale.
+    let mut requested = false;
+    loop {
         loop {
             match rx.try_recv() {
-                Ok(MjaiEvent::StartGame { .. }) => {
-                    *in_game = true;
-                    anyhow::bail!("another game started");
-                }
+                Ok(MjaiEvent::StartGame { .. }) => return Ok(()),
                 Ok(_) => {}
                 Err(broadcast::error::TryRecvError::Empty) => break,
-                Err(broadcast::error::TryRecvError::Lagged(_)) => {
-                    anyhow::bail!("mjai events lagged during rematch")
-                }
-                Err(broadcast::error::TryRecvError::Closed) => anyhow::bail!("mjai bus closed"),
+                Err(e) => anyhow::bail!("mjai bus during rematch: {e}"),
             }
         }
-        let guard = cfg.read().await;
-        let active = guard.autoplay.enabled
-            && guard.platform.kind == Platform::Majsoul
-            && guard.autoplay.majsoul.remaining_games > 0;
-        drop(guard);
-        if !active {
-            anyhow::bail!("rematch disabled in settings");
-        }
-
-        let (screen, rect) = match capture_screen(&page).await {
-            Ok(frame) => frame,
+        anyhow::ensure!(
+            rematch_enabled(&*state.config.read().await),
+            "rematch disabled in settings"
+        );
+        let delay = match click_visible_button(&page, &state.config, &mut requested).await {
+            Ok(true) => AFTER_CLICK,
+            Ok(false) => POLL,
             Err(e) => {
-                warn!("autoplay: rematch screenshot failed: {e:#}");
-                tokio::time::sleep(POLL).await;
-                continue;
+                warn!("autoplay: result-screen step failed: {e:#}");
+                POLL
             }
         };
-        let action = choose_action(phase, screen, confirms, rematches);
-        if action == Action::Wait {
-            tokio::time::sleep(POLL).await;
-            continue;
-        }
-        press(&page, rect, action, cfg).await?;
-        clicks += 1;
-        match action {
-            Action::Rematch => {
-                rematches += 1;
-                phase = Phase::MatchDialog;
-            }
-            Action::Dialog => {
-                info!(clicks, "autoplay: rematch dialog confirmation clicked");
-                return Ok(());
-            }
-            Action::Confirm => {
-                confirms += 1;
-            }
-            Action::Advance => {}
-            Action::Wait => {}
-        }
-        tokio::time::sleep(AFTER_CLICK).await;
+        tokio::time::sleep(delay).await;
     }
-    anyhow::bail!("rematch stopped after {clicks} clicks without reaching matchmaking")
+}
+
+/// Screenshot once and click the matching button. Returns whether it clicked.
+async fn click_visible_button(
+    page: &Page,
+    cfg: &RwLock<AppConfig>,
+    requested: &mut bool,
+) -> anyhow::Result<bool> {
+    let (screen, rect) = capture_screen(page).await?;
+    let Some(region) = target(screen, *requested) else {
+        return Ok(false);
+    };
+    let (x, y) = region.center();
+    let px = rect.x + x / GAME_WIDTH * rect.width;
+    let py = rect.y + y / GAME_HEIGHT * rect.height;
+    anyhow::ensure!(rect.contains(px, py), "rematch click outside canvas");
+    let (hover, hold) = {
+        let timing = &cfg.read().await.autoplay.majsoul;
+        (timing.hover_delay_ms.max(100), timing.click_hold_ms.max(50))
+    };
+    dispatch_click(page, px, py, hover, hold).await?;
+    info!(?screen, px, py, "autoplay: result-screen click");
+    *requested |= matches!(screen, Screen::Dialog | Screen::Rematch);
+    Ok(true)
 }
 
 async fn capture_screen(page: &Page) -> anyhow::Result<(Screen, CanvasRect)> {
@@ -382,25 +325,6 @@ fn classify_coverage(rematch_blue: f64, dialog_gold: f64, confirm_gold: f64) -> 
         Screen::Other
     }
 }
-async fn press(
-    page: &Page,
-    rect: CanvasRect,
-    action: Action,
-    cfg: &Arc<RwLock<AppConfig>>,
-) -> anyhow::Result<()> {
-    let (x, y) = action.point().expect("only clicks are passed to press");
-    let px = rect.x + x / GAME_WIDTH * rect.width;
-    let py = rect.y + y / GAME_HEIGHT * rect.height;
-    anyhow::ensure!(rect.contains(px, py), "rematch click outside canvas");
-    let guard = cfg.read().await;
-    let timing = &guard.autoplay.majsoul;
-    let hover = timing.hover_delay_ms.max(100);
-    let hold = timing.click_hold_ms.max(50);
-    drop(guard);
-    dispatch_click(page, px, py, hover, hold).await?;
-    info!(?action, px, py, "autoplay: result-screen click");
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {
@@ -418,40 +342,19 @@ mod tests {
     }
 
     #[test]
-    fn unknown_screens_never_repeat_the_confirm_button() {
-        assert_eq!(Action::Advance.point(), Action::Rematch.point());
-        assert_eq!(
-            choose_action(Phase::Results, Screen::Confirm, 0, 0),
-            Action::Confirm
-        );
-        assert_eq!(
-            choose_action(Phase::Results, Screen::Confirm, 2, 0),
-            Action::Advance
-        );
-        assert_eq!(
-            choose_action(Phase::Results, Screen::Other, 2, 0),
-            Action::Advance
-        );
-        assert_eq!(
-            choose_action(Phase::Results, Screen::Other, 2, 2),
-            Action::Advance
-        );
-        assert_eq!(
-            choose_action(Phase::Results, Screen::Rematch, 2, 0),
-            Action::Rematch
-        );
-        assert_eq!(
-            choose_action(Phase::Results, Screen::Dialog, 0, 0),
-            Action::Dialog
-        );
-        assert_eq!(
-            choose_action(Phase::MatchDialog, Screen::Other, 2, 1),
-            Action::Wait
-        );
-        assert_eq!(
-            choose_action(Phase::MatchDialog, Screen::Dialog, 2, 1),
-            Action::Dialog
-        );
+    fn buttons_are_clicked_every_time_they_are_seen() {
+        for requested in [false, true] {
+            assert_eq!(target(Screen::Dialog, requested), Some(DIALOG));
+            assert_eq!(target(Screen::Rematch, requested), Some(REMATCH));
+        }
+        assert_eq!(target(Screen::Confirm, false), Some(CONFIRM));
+        assert_eq!(target(Screen::Other, false), Some(REMATCH));
+    }
+
+    #[test]
+    fn requested_match_never_clicks_blindly() {
+        assert_eq!(target(Screen::Other, true), None);
+        assert_eq!(target(Screen::Confirm, true), None);
     }
 
     #[test]

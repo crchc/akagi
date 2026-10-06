@@ -20,7 +20,7 @@ use crate::schema::MjaiEvent;
 use coords::TSUMO_SPACE;
 use coords::{
     action_button_pos, candidate_pos, get_pai_coord, kan_candidate_pos, MajsoulOpType,
-    ACTION_PRIORITY, TILES,
+    ACTION_PRIORITY, TILES, TILE_WIDTH,
 };
 use riichienv_core::action::{Action, ActionType};
 use riichienv_core::parser::tid_to_mjai;
@@ -36,201 +36,235 @@ impl MajsoulAutoplay {
 
 impl PlatformAutoplay for MajsoulAutoplay {
     fn plan(&self, ctx: &ActionContext) -> PlanResult {
-        let mut result = PlanResult::default();
-
-        match ctx.action {
-            // ----- Dahai (打牌) ---------------------------------------------
-            MjaiEvent::Dahai { actor, pai, .. } if *actor == ctx.our_seat => {
-                // While in riichi, Majsoul auto-discards, so ours would be a
-                // second one. (The riichi-declaring tile goes out inside the
-                // Reach plan below, before acceptance, so it is unaffected.)
-                if ctx.self_riichi_accepted {
-                    // …with one exception: the auto-discard is held back
-                    // while an own-draw operation prompt is open — kita on
-                    // a drawn North (sanma), a riichi-legal ankan, or a
-                    // tsumo agari. Majsoul waits for an answer, so a bot
-                    // decision to tsumogiri must decline the prompt via
-                    // the X button; the client then discards the draw on
-                    // its own. Returning with no click here left the game
-                    // hanging until the turn timer and the entire time
-                    // bank drained (the server eventually auto-declines).
-                    if riichi_prompt_pending(ctx, pai) {
-                        push_pre_delay(&mut result.steps, ctx, DecisionKind::Pass, 0);
-                        if let Some(button) = action_button_for(MajsoulOpType::None, ctx) {
-                            result.steps.push(Step::Click {
-                                x_norm: button.0,
-                                y_norm: button.1,
-                            });
-                        }
-                    }
-                    return result;
-                }
-                // The dealer-opening hand-sort animation wait (clicks
-                // issued during it are dropped) is folded into the delay
-                // model as the `opening_animation` functional floor.
-                push_pre_delay(&mut result.steps, ctx, DecisionKind::Dahai, 0);
-                if let Some(click) = plan_dahai_click(pai, ctx) {
-                    result.steps.push(click);
-                }
-            }
-
-            // ----- Reach (立直) — declaration + tile in one plan ----------
-            MjaiEvent::Reach { actor, pai } if *actor == ctx.our_seat => {
-                // Majsoul fuses declaring + discarding into one action, so the
-                // tile must be known up front. It normally is — the bot fills
-                // `Reach.pai` (natively or via the manager's autoplay reach
-                // follow-up, #257, which logs when it cannot). A bare reach
-                // here means that resolution failed; declare nothing rather
-                // than press the button and leave the client sitting on an
-                // owed discard until timeout.
-                let Some(tile) = pai else {
-                    return PlanResult::default();
-                };
-                // Clicks the riichi tile right after the button, so reserve
-                // one extra click of overhead.
-                push_pre_delay(&mut result.steps, ctx, DecisionKind::Reach, 1);
-                if let Some(button) = action_button_for(MajsoulOpType::Reach, ctx) {
-                    result.steps.push(Step::Click {
-                        x_norm: button.0,
-                        y_norm: button.1,
-                    });
-                } else {
-                    // Reach not in legal_actions — bridge desync; bail.
-                    return PlanResult::default();
-                }
-                result.steps.push(Step::Sleep {
-                    duration_ms: ctx.cfg.inter_click_delay_ms,
-                });
-                if let Some(click) = plan_dahai_click(tile, ctx) {
-                    result.steps.push(click);
-                }
-            }
-
-            // ----- Chi / Pon / Daiminkan / Ankan / Kakan -------------------
-            // (action button + optional candidate disambiguation)
-            MjaiEvent::Chi { actor, .. } if *actor == ctx.our_seat => {
-                push_pre_delay(&mut result.steps, ctx, DecisionKind::Chi, 1);
-                plan_meld(MajsoulOpType::Chi, ActionType::Chi, &mut result, ctx);
-            }
-            MjaiEvent::Pon { actor, .. } if *actor == ctx.our_seat => {
-                push_pre_delay(&mut result.steps, ctx, DecisionKind::Pon, 1);
-                plan_meld(MajsoulOpType::Pon, ActionType::Pon, &mut result, ctx);
-            }
-            MjaiEvent::Daiminkan { actor, .. } if *actor == ctx.our_seat => {
-                push_pre_delay(&mut result.steps, ctx, DecisionKind::Daiminkan, 1);
-                plan_meld(
-                    MajsoulOpType::Daiminkan,
-                    ActionType::Daiminkan,
-                    &mut result,
-                    ctx,
-                );
-            }
-            MjaiEvent::Ankan { actor, .. } if *actor == ctx.our_seat => {
-                push_pre_delay(&mut result.steps, ctx, DecisionKind::Ankan, 1);
-                plan_kan(MajsoulOpType::Ankan, ActionType::Ankan, &mut result, ctx);
-            }
-            MjaiEvent::Kakan { actor, .. } if *actor == ctx.our_seat => {
-                push_pre_delay(&mut result.steps, ctx, DecisionKind::Kakan, 1);
-                plan_kan(MajsoulOpType::Kakan, ActionType::Kakan, &mut result, ctx);
-            }
-
-            // ----- Hora — zimo button on own draw, ron on opponent ---------
-            MjaiEvent::Hora { actor, .. } if *actor == ctx.our_seat => {
-                let op = if hora_is_tsumo(ctx) {
-                    MajsoulOpType::Zimo
-                } else {
-                    MajsoulOpType::Ron
-                };
-                push_pre_delay(&mut result.steps, ctx, DecisionKind::Hora, 0);
-                if let Some(button) = action_button_for(op, ctx) {
-                    result.steps.push(Step::Click {
-                        x_norm: button.0,
-                        y_norm: button.1,
-                    });
-                }
-            }
-
-            // ----- Ryukyoku (九種九牌) -------------------------------------
-            MjaiEvent::Ryukyoku { .. } => {
-                push_pre_delay(&mut result.steps, ctx, DecisionKind::Ryukyoku, 0);
-                if let Some(button) = action_button_for(MajsoulOpType::Ryukyoku, ctx) {
-                    result.steps.push(Step::Click {
-                        x_norm: button.0,
-                        y_norm: button.1,
-                    });
-                }
-            }
-
-            // ----- Kita (3p 北抜き) ----------------------------------------
-            MjaiEvent::Kita { actor, .. } if *actor == ctx.our_seat => {
-                // On the opening draw of a kyoku, Majsoul plays a tile-
-                // dealing animation; clicks issued during it land on the
-                // wrong target. Folded into the delay model as
-                // `opening_animation` (same wait as dealer first discard).
-                push_pre_delay(&mut result.steps, ctx, DecisionKind::Kita, 0);
-                if let Some(button) = action_button_for(MajsoulOpType::Nukidora, ctx) {
-                    result.steps.push(Step::Click {
-                        x_norm: button.0,
-                        y_norm: button.1,
-                    });
-                }
-            }
-
-            // ----- None — pass / cancel button -----------------------------
-            //
-            // The bot emits `None` on every mjai event it has nothing to say
-            // about — including pure echoes of other players' tsumo/dahai
-            // notifies, where Majsoul is showing no buttons at all. Without
-            // a gate we'd loop-click the lobby/preview UI's rightmost button
-            // on every other-player turn.
-            //
-            // riichienv only adds `ActionType::Pass` to legal_actions in
-            // `Phase::WaitResponse` (`riichienv-core/src/state/legal_actions.rs:249`)
-            // — i.e. exactly when Majsoul is showing the Pass button after a
-            // claimable discard. Use that as the visibility gate.
-            MjaiEvent::None => {
-                if !pass_button_visible(ctx) {
-                    return result;
-                }
-                // Extra guard: never click Pass during WaitAct (own draw turn).
-                // Stale legal_actions from the previous round can falsely expose
-                // Pass before the tracker has processed start_kyoku.
-                if ctx.snapshot.phase != crate::game_state::snapshot::Phase::WaitResponse {
-                    return result;
-                }
-                // Extra guard: only click Skip when there's an actual claim option
-                // (pon/ron/daiminkan). In 3p there's no chi, so many WaitResponse
-                // windows have no claimable actions — Majsoul shows no buttons at all
-                // and a ghost click would land on the wrong UI element.
-                let has_claim = ctx.legal_actions.iter().any(|a| {
-                    matches!(
-                        a.action_type,
-                        riichienv_core::action::ActionType::Pon
-                            | riichienv_core::action::ActionType::Daiminkan
-                            | riichienv_core::action::ActionType::Ron
-                            | riichienv_core::action::ActionType::Chi
-                    )
-                });
-                if !has_claim {
-                    return result;
-                }
-                push_pre_delay(&mut result.steps, ctx, DecisionKind::Pass, 0);
-                if let Some(button) = action_button_for(MajsoulOpType::None, ctx) {
-                    result.steps.push(Step::Click {
-                        x_norm: button.0,
-                        y_norm: button.1,
-                    });
-                }
-            }
-
-            // Everything else (StartGame, Tsumo, Dora, ReachAccepted,
-            // EndKyoku, EndGame, events from other seats) doesn't drive
-            // a click.
-            _ => {}
-        }
-
+        let mut result = plan_centred(ctx);
+        offset_clicks(
+            &mut result.steps,
+            ctx.cfg.click_offset_pct,
+            &mut rand::rng(),
+        );
         result
     }
+}
+
+/// Upper bound on `click_offset_pct`: past half a tile width a click
+/// lands on the neighbour, so stop a little short of that.
+const MAX_CLICK_OFFSET_PCT: u32 = 45;
+
+/// Move every canvas click a random distance off the centre of its
+/// target: uniform within `±pct%` of a tile width on each axis. Tiles are
+/// the smallest targets, so the same bound is safe for buttons and the
+/// candidate row. Retries replay the plan's points, so a missed press is
+/// pressed again where it landed rather than at a new spot.
+fn offset_clicks<R: rand::Rng + ?Sized>(steps: &mut [Step], pct: u32, rng: &mut R) {
+    let pct = pct.min(MAX_CLICK_OFFSET_PCT);
+    if pct == 0 {
+        return;
+    }
+    let reach = TILE_WIDTH * f64::from(pct) / 100.0;
+    for step in steps {
+        if let Step::Click { x_norm, y_norm } = step {
+            *x_norm += rng.random_range(-reach..=reach);
+            *y_norm += rng.random_range(-reach..=reach);
+        }
+    }
+}
+
+/// The click plan for `ctx.action`, aimed at the centre of each target.
+fn plan_centred(ctx: &ActionContext) -> PlanResult {
+    let mut result = PlanResult::default();
+
+    match ctx.action {
+        // ----- Dahai (打牌) ---------------------------------------------
+        MjaiEvent::Dahai { actor, pai, .. } if *actor == ctx.our_seat => {
+            // While in riichi, Majsoul auto-discards, so ours would be a
+            // second one. (The riichi-declaring tile goes out inside the
+            // Reach plan below, before acceptance, so it is unaffected.)
+            if ctx.self_riichi_accepted {
+                // …with one exception: the auto-discard is held back
+                // while an own-draw operation prompt is open — kita on
+                // a drawn North (sanma), a riichi-legal ankan, or a
+                // tsumo agari. Majsoul waits for an answer, so a bot
+                // decision to tsumogiri must decline the prompt via
+                // the X button; the client then discards the draw on
+                // its own. Returning with no click here left the game
+                // hanging until the turn timer and the entire time
+                // bank drained (the server eventually auto-declines).
+                if riichi_prompt_pending(ctx, pai) {
+                    push_pre_delay(&mut result.steps, ctx, DecisionKind::Pass, 0);
+                    if let Some(button) = action_button_for(MajsoulOpType::None, ctx) {
+                        result.steps.push(Step::Click {
+                            x_norm: button.0,
+                            y_norm: button.1,
+                        });
+                    }
+                }
+                return result;
+            }
+            // The dealer-opening hand-sort animation wait (clicks
+            // issued during it are dropped) is folded into the delay
+            // model as the `opening_animation` functional floor.
+            push_pre_delay(&mut result.steps, ctx, DecisionKind::Dahai, 0);
+            if let Some(click) = plan_dahai_click(pai, ctx) {
+                result.steps.push(click);
+            }
+        }
+
+        // ----- Reach (立直) — declaration + tile in one plan ----------
+        MjaiEvent::Reach { actor, pai } if *actor == ctx.our_seat => {
+            // Majsoul fuses declaring + discarding into one action, so the
+            // tile must be known up front. It normally is — the bot fills
+            // `Reach.pai` (natively or via the manager's autoplay reach
+            // follow-up, #257, which logs when it cannot). A bare reach
+            // here means that resolution failed; declare nothing rather
+            // than press the button and leave the client sitting on an
+            // owed discard until timeout.
+            let Some(tile) = pai else {
+                return PlanResult::default();
+            };
+            // Clicks the riichi tile right after the button, so reserve
+            // one extra click of overhead.
+            push_pre_delay(&mut result.steps, ctx, DecisionKind::Reach, 1);
+            if let Some(button) = action_button_for(MajsoulOpType::Reach, ctx) {
+                result.steps.push(Step::Click {
+                    x_norm: button.0,
+                    y_norm: button.1,
+                });
+            } else {
+                // Reach not in legal_actions — bridge desync; bail.
+                return PlanResult::default();
+            }
+            result.steps.push(Step::Sleep {
+                duration_ms: ctx.cfg.sample_inter_click_delay(&mut rand::rng()),
+            });
+            if let Some(click) = plan_dahai_click(tile, ctx) {
+                result.steps.push(click);
+            }
+        }
+
+        // ----- Chi / Pon / Daiminkan / Ankan / Kakan -------------------
+        // (action button + optional candidate disambiguation)
+        MjaiEvent::Chi { actor, .. } if *actor == ctx.our_seat => {
+            push_pre_delay(&mut result.steps, ctx, DecisionKind::Chi, 1);
+            plan_meld(MajsoulOpType::Chi, ActionType::Chi, &mut result, ctx);
+        }
+        MjaiEvent::Pon { actor, .. } if *actor == ctx.our_seat => {
+            push_pre_delay(&mut result.steps, ctx, DecisionKind::Pon, 1);
+            plan_meld(MajsoulOpType::Pon, ActionType::Pon, &mut result, ctx);
+        }
+        MjaiEvent::Daiminkan { actor, .. } if *actor == ctx.our_seat => {
+            push_pre_delay(&mut result.steps, ctx, DecisionKind::Daiminkan, 1);
+            plan_meld(
+                MajsoulOpType::Daiminkan,
+                ActionType::Daiminkan,
+                &mut result,
+                ctx,
+            );
+        }
+        MjaiEvent::Ankan { actor, .. } if *actor == ctx.our_seat => {
+            push_pre_delay(&mut result.steps, ctx, DecisionKind::Ankan, 1);
+            plan_kan(MajsoulOpType::Ankan, ActionType::Ankan, &mut result, ctx);
+        }
+        MjaiEvent::Kakan { actor, .. } if *actor == ctx.our_seat => {
+            push_pre_delay(&mut result.steps, ctx, DecisionKind::Kakan, 1);
+            plan_kan(MajsoulOpType::Kakan, ActionType::Kakan, &mut result, ctx);
+        }
+
+        // ----- Hora — zimo button on own draw, ron on opponent ---------
+        MjaiEvent::Hora { actor, .. } if *actor == ctx.our_seat => {
+            let op = if hora_is_tsumo(ctx) {
+                MajsoulOpType::Zimo
+            } else {
+                MajsoulOpType::Ron
+            };
+            push_pre_delay(&mut result.steps, ctx, DecisionKind::Hora, 0);
+            if let Some(button) = action_button_for(op, ctx) {
+                result.steps.push(Step::Click {
+                    x_norm: button.0,
+                    y_norm: button.1,
+                });
+            }
+        }
+
+        // ----- Ryukyoku (九種九牌) -------------------------------------
+        MjaiEvent::Ryukyoku { .. } => {
+            push_pre_delay(&mut result.steps, ctx, DecisionKind::Ryukyoku, 0);
+            if let Some(button) = action_button_for(MajsoulOpType::Ryukyoku, ctx) {
+                result.steps.push(Step::Click {
+                    x_norm: button.0,
+                    y_norm: button.1,
+                });
+            }
+        }
+
+        // ----- Kita (3p 北抜き) ----------------------------------------
+        MjaiEvent::Kita { actor, .. } if *actor == ctx.our_seat => {
+            // On the opening draw of a kyoku, Majsoul plays a tile-
+            // dealing animation; clicks issued during it land on the
+            // wrong target. Folded into the delay model as
+            // `opening_animation` (same wait as dealer first discard).
+            push_pre_delay(&mut result.steps, ctx, DecisionKind::Kita, 0);
+            if let Some(button) = action_button_for(MajsoulOpType::Nukidora, ctx) {
+                result.steps.push(Step::Click {
+                    x_norm: button.0,
+                    y_norm: button.1,
+                });
+            }
+        }
+
+        // ----- None — pass / cancel button -----------------------------
+        //
+        // The bot emits `None` on every mjai event it has nothing to say
+        // about — including pure echoes of other players' tsumo/dahai
+        // notifies, where Majsoul is showing no buttons at all. Without
+        // a gate we'd loop-click the lobby/preview UI's rightmost button
+        // on every other-player turn.
+        //
+        // riichienv only adds `ActionType::Pass` to legal_actions in
+        // `Phase::WaitResponse` (`riichienv-core/src/state/legal_actions.rs:249`)
+        // — i.e. exactly when Majsoul is showing the Pass button after a
+        // claimable discard. Use that as the visibility gate.
+        MjaiEvent::None => {
+            if !pass_button_visible(ctx) {
+                return result;
+            }
+            // Extra guard: never click Pass during WaitAct (own draw turn).
+            // Stale legal_actions from the previous round can falsely expose
+            // Pass before the tracker has processed start_kyoku.
+            if ctx.snapshot.phase != crate::game_state::snapshot::Phase::WaitResponse {
+                return result;
+            }
+            // Extra guard: only click Skip when there's an actual claim option
+            // (pon/ron/daiminkan). In 3p there's no chi, so many WaitResponse
+            // windows have no claimable actions — Majsoul shows no buttons at all
+            // and a ghost click would land on the wrong UI element.
+            let has_claim = ctx.legal_actions.iter().any(|a| {
+                matches!(
+                    a.action_type,
+                    riichienv_core::action::ActionType::Pon
+                        | riichienv_core::action::ActionType::Daiminkan
+                        | riichienv_core::action::ActionType::Ron
+                        | riichienv_core::action::ActionType::Chi
+                )
+            });
+            if !has_claim {
+                return result;
+            }
+            push_pre_delay(&mut result.steps, ctx, DecisionKind::Pass, 0);
+            if let Some(button) = action_button_for(MajsoulOpType::None, ctx) {
+                result.steps.push(Step::Click {
+                    x_norm: button.0,
+                    y_norm: button.1,
+                });
+            }
+        }
+
+        // Everything else (StartGame, Tsumo, Dora, ReachAccepted,
+        // EndKyoku, EndGame, events from other seats) doesn't drive
+        // a click.
+        _ => {}
+    }
+
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +290,7 @@ fn push_pre_delay(
 ) {
     let cfg = ctx.cfg;
     let per_click = cfg.hover_delay_ms + cfg.click_hold_ms;
-    let click_overhead_ms = per_click + extra_clicks * (per_click + cfg.inter_click_delay_ms);
+    let click_overhead_ms = per_click + extra_clicks * (per_click + cfg.inter_click_delay_max());
 
     let opening_animation = match kind {
         DecisionKind::Dahai => is_dealer_first_discard(ctx),
@@ -502,7 +536,7 @@ fn plan_meld(op: MajsoulOpType, at: ActionType, result: &mut PlanResult, ctx: &A
     {
         if let Some(p) = candidate_pos(idx, candidates.len()) {
             result.steps.push(Step::Sleep {
-                duration_ms: ctx.cfg.inter_click_delay_ms,
+                duration_ms: ctx.cfg.sample_inter_click_delay(&mut rand::rng()),
             });
             result.steps.push(Step::Click {
                 x_norm: p.0,
@@ -580,7 +614,7 @@ fn plan_kan(op: MajsoulOpType, at: ActionType, result: &mut PlanResult, ctx: &Ac
         // — kept in the signature so future logic can branch on it.
         let _ = at;
         result.steps.push(Step::Sleep {
-            duration_ms: ctx.cfg.inter_click_delay_ms,
+            duration_ms: ctx.cfg.sample_inter_click_delay(&mut rand::rng()),
         });
         result.steps.push(Step::Click {
             x_norm: p.0,
@@ -752,6 +786,7 @@ mod tests {
             pre_click_delay_min_ms: 0,
             pre_click_delay_max_ms: 0,
             inter_click_delay_ms: 0,
+            click_offset_pct: 0,
             hover_delay_ms: 0,
             click_hold_ms: 0,
             verify_input_ms: 0,
@@ -759,6 +794,48 @@ mod tests {
             reload_after_failures: 0,
             dealer_first_discard_extra_delay_ms: 0,
         }
+    }
+
+    /// Offset clicks stay within the configured share of a tile width,
+    /// and the cap keeps an oversized setting on the aimed tile.
+    #[test]
+    fn click_offset_stays_within_configured_reach() {
+        let mut rng = rand::rng();
+        for (pct, limit) in [(20, 0.2), (90, 0.45)] {
+            for _ in 0..200 {
+                let mut steps = vec![
+                    Step::Sleep { duration_ms: 5 },
+                    Step::Click {
+                        x_norm: TILES[3].0,
+                        y_norm: TILES[3].1,
+                    },
+                ];
+                offset_clicks(&mut steps, pct, &mut rng);
+                assert_eq!(steps[0], Step::Sleep { duration_ms: 5 });
+                let Step::Click { x_norm, y_norm } = steps[1] else {
+                    panic!("click step replaced");
+                };
+                let reach = TILE_WIDTH * limit + 1e-9;
+                assert!((x_norm - TILES[3].0).abs() <= reach);
+                assert!((y_norm - TILES[3].1).abs() <= reach);
+            }
+        }
+    }
+
+    #[test]
+    fn zero_click_offset_keeps_centre() {
+        let mut steps = vec![Step::Click {
+            x_norm: TILES[0].0,
+            y_norm: TILES[0].1,
+        }];
+        offset_clicks(&mut steps, 0, &mut rand::rng());
+        assert_eq!(
+            steps[0],
+            Step::Click {
+                x_norm: TILES[0].0,
+                y_norm: TILES[0].1,
+            }
+        );
     }
 
     fn cfg_with_dealer_delay(ms: u32) -> MajsoulAutoplayConfig {

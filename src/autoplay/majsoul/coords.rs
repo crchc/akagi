@@ -31,6 +31,10 @@ pub const TILES: [(f64, f64); 14] = [
     (12.509_375, 8.362_5),
 ];
 
+/// Width of one hand tile: the pitch of [`TILES`], whose tiles sit edge
+/// to edge.
+pub const TILE_WIDTH: f64 = 0.790_625;
+
 /// Horizontal offset between the closed hand's last tile and the
 /// just-drawn tsumohai.
 pub const TSUMO_SPACE: f64 = 0.246_875;

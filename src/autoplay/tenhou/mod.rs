@@ -464,7 +464,7 @@ impl PlatformAutoplay for TenhouAutoplay {
             // Let the client finish taking the declaration before handing
             // it the tile.
             result.steps.push(Step::Sleep {
-                duration_ms: ctx.cfg.inter_click_delay_ms,
+                duration_ms: ctx.cfg.sample_inter_click_delay(&mut rand::rng()),
             });
             result.steps.push(Step::Discard { tile_index });
         }

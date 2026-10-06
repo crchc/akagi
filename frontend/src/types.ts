@@ -102,11 +102,14 @@ export type MajsoulAutoplayConfig = {
   remaining_games: number
   pre_click_delay_min_ms: number
   pre_click_delay_max_ms: number
+  /** Typical gap between staged clicks; each gap is random within ±50%. */
   inter_click_delay_ms: number
+  /** Max click distance from the target's centre, % of a tile width per axis (capped at 45). */
+  click_offset_pct: number
   hover_delay_ms: number
   click_hold_ms: number
   /** Wait this long for the client's own input command after a click
-   *  before pressing again; 0 disables verification. */
+   *  before pressing again; 0 disables verification. Config-file only. */
   verify_input_ms: number
   /** Retries when no input command follows a click sequence; 0 = log only. */
   click_retries: number

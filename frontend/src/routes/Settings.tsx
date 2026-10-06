@@ -763,9 +763,10 @@ function AutoplayCard({
       remaining_games: 1,
       pre_click_delay_min_ms: 1000,
       pre_click_delay_max_ms: 3000,
-      inter_click_delay_ms: 300,
-      hover_delay_ms: 150,
-      click_hold_ms: 50,
+      inter_click_delay_ms: 400,
+      click_offset_pct: 20,
+      hover_delay_ms: 200,
+      click_hold_ms: 100,
       verify_input_ms: 300,
       click_retries: 2,
       reload_after_failures: 3,
@@ -879,7 +880,10 @@ function AutoplayCard({
             }
           />
         </Field>
-        <Field label={t('settings.autoplay.inter_click_delay')}>
+        <Field
+          label={t('settings.autoplay.inter_click_delay')}
+          hint={t('settings.autoplay.inter_click_delay_hint')}
+        >
           <Input
             type="number"
             inputMode="numeric"
@@ -887,7 +891,24 @@ function AutoplayCard({
             value={ap.majsoul.inter_click_delay_ms}
             onChange={(e) =>
               setMajsoulField({
-                inter_click_delay_ms: Number(e.target.value || 0),
+                inter_click_delay_ms: Math.max(0, Number(e.target.value || 0)),
+              })
+            }
+          />
+        </Field>
+        <Field
+          label={t('settings.autoplay.click_offset')}
+          hint={t('settings.autoplay.click_offset_hint')}
+        >
+          <Input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={45}
+            value={ap.majsoul.click_offset_pct}
+            onChange={(e) =>
+              setMajsoulField({
+                click_offset_pct: Math.max(0, Number(e.target.value || 0)),
               })
             }
           />
@@ -917,22 +938,6 @@ function AutoplayCard({
             onChange={(e) =>
               setMajsoulField({
                 click_hold_ms: Number(e.target.value || 0),
-              })
-            }
-          />
-        </Field>
-        <Field
-          label={t('settings.autoplay.verify_input')}
-          hint={t('settings.autoplay.verify_input_hint')}
-        >
-          <Input
-            type="number"
-            inputMode="numeric"
-            min={0}
-            value={ap.majsoul.verify_input_ms}
-            onChange={(e) =>
-              setMajsoulField({
-                verify_input_ms: Number(e.target.value || 0),
               })
             }
           />
